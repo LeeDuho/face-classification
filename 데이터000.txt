@@ -1,0 +1,3211 @@
+//처음꺼
+//data
+
+
+
+from torch.autograd.variable import Variable
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+import torchvision
+import matplotlib.pyplot as plt
+
+import os
+import torch.backends.cudnn as cudnn
+
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import transforms
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+
+
+class VGG(nn.Module):
+    def __init__(self):
+        super(VGG, self).__init__()
+        self.cnn = nn.Sequential(
+            # 3 x 128 x 128
+            nn.Conv2d(3, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 64 x 64 x 64
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 128 x 32 x 32
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 256 x 16 x 16
+            nn.Conv2d(256, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 512 x 8 x 8
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+            # 512 x 4 x 4
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(512 * 4 * 4, 4096),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+
+            nn.Linear(4096, 2048),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+
+            nn.Linear(2048, 4)
+        )
+    def forward(self, x):
+        output = self.cnn(x)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+        return output
+
+
+
+tf = transforms.Compose([
+    transforms.Resize((128,128)),
+    transforms.ToTensor(),  
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.2, 0.2, 0.2]),
+])
+
+  #'cat': 0, 'dog': 1, 'horse': 2, 'monkey': 3
+
+#남여구별
+train_data = torchvision.datasets.ImageFolder('/content/drive/MyDrive/dataset/processed_data', transform=tf)
+test_data = torchvision.datasets.ImageFolder('/content/drive/MyDrive/dataset/processed_test_data', transform=tf)
+
+
+loader = DataLoader(train_data, batch_size=20, shuffle=True)
+tdloader = DataLoader(test_data, batch_size=8, shuffle=True)
+
+# VGG모델 불러오기, 사용
+model = VGG()
+
+print(model)
+
+optimizer = optim.Adam(model.parameters(), lr=0.00003)
+loss_func = nn.CrossEntropyLoss(reduction='mean')
+
+if torch.cuda.device_count() > 0:
+    print("USE", torch.cuda.device_count(), "GPUs!")
+    model = nn.DataParallel(model).cuda()
+    cudnn.benchmark = True
+else:
+    print("USE ONLY CPU!")
+
+losses = []
+acc = 0
+
+for epoch in range(100): 
+    print("----------------\n epoch: ", epoch)
+
+    model.train()
+    acc = 0
+    pbar = tqdm(loader)
+    for imgs, labels in pbar:
+        imgs = imgs.cuda()
+        labels = labels.cuda()
+
+        optimizer.zero_grad()
+        outputs = model(imgs)
+        
+        loss = loss_func(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        losses.append(loss.item())
+
+        _, predicted = torch.max(outputs.data, 1)
+        acc += (predicted == labels).sum().item()
+
+        pbar.set_description(f'Epoch: {epoch+1}, loss: {loss.item():.4f}, correct: {acc}/{len(train_data)}')
+
+    print(f"train acc: {acc/len(train_data)*100}%")
+
+
+    model.eval()
+    acc = 0
+    pbar = tqdm(tdloader)
+    
+    with torch.no_grad():
+        for imgs, labels in pbar:
+            imgs = imgs.cuda()
+            labels = labels.cuda()
+
+            outputs = model(imgs)
+            _, predicted = torch.max(outputs.data, 1)
+            acc += (predicted == labels).sum().item()
+
+            pbar.set_description(f'Epoch: {epoch+1}, correct: {acc}/{len(test_data)}')
+
+        print(f"test acc: {acc/len(test_data)*100}%")
+
+##save model
+#torch.save(model.state_dict(), './model.pth')
+
+model.eval()
+with torch.no_grad():
+  #test_data의 모든 이미지를 불러와서 예측
+  for i in range(len(test_data)):
+    img, label = test_data[i]
+    img = img.unsqueeze(0).cuda()
+    output = model(img)
+    _, predicted = torch.max(output.data, 1)
+    #이미지이름을 출력
+    print("---------------------------")
+    print(test_data.imgs[i][0].split('/')[-1], end=' ')
+    print(f"predicted: {predicted}, label: {label}")
+
+
+
+
+////////////////////////////
+
+
+Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount("/content/drive", force_remount=True).
+VGG(
+  (cnn): Sequential(
+    (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (1): ReLU()
+    (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (3): ReLU()
+    (4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (5): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (6): ReLU()
+    (7): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (8): ReLU()
+    (9): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (10): Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (11): ReLU()
+    (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (13): ReLU()
+    (14): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (15): ReLU()
+    (16): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (17): Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (18): ReLU()
+    (19): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (20): ReLU()
+    (21): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (22): ReLU()
+    (23): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (24): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (25): ReLU()
+    (26): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (27): ReLU()
+    (28): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (29): ReLU()
+    (30): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  )
+  (fc): Sequential(
+    (0): Linear(in_features=8192, out_features=4096, bias=True)
+    (1): ReLU()
+    (2): Dropout(p=0.5, inplace=False)
+    (3): Linear(in_features=4096, out_features=2048, bias=True)
+    (4): ReLU()
+    (5): Dropout(p=0.5, inplace=False)
+    (6): Linear(in_features=2048, out_features=4, bias=True)
+  )
+)
+USE 1 GPUs!
+----------------
+ epoch:  0
+Epoch: 1, loss: 1.3866, correct: 239/1000: 100%|██████████| 50/50 [00:12<00:00,  4.06it/s]
+train acc: 23.9%
+Epoch: 1, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 19.15it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  1
+Epoch: 2, loss: 1.3854, correct: 236/1000: 100%|██████████| 50/50 [00:07<00:00,  6.32it/s]
+train acc: 23.599999999999998%
+Epoch: 2, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 27.91it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  2
+Epoch: 3, loss: 1.3857, correct: 241/1000: 100%|██████████| 50/50 [00:07<00:00,  6.32it/s]
+train acc: 24.099999999999998%
+Epoch: 3, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 27.83it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  3
+Epoch: 4, loss: 1.3879, correct: 228/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 22.8%
+Epoch: 4, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.19it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  4
+Epoch: 5, loss: 1.3871, correct: 244/1000: 100%|██████████| 50/50 [00:07<00:00,  6.29it/s]
+train acc: 24.4%
+Epoch: 5, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 27.24it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  5
+Epoch: 6, loss: 1.3867, correct: 245/1000: 100%|██████████| 50/50 [00:08<00:00,  6.23it/s]
+train acc: 24.5%
+Epoch: 6, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 25.00it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  6
+Epoch: 7, loss: 1.3865, correct: 252/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 25.2%
+Epoch: 7, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 27.24it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  7
+Epoch: 8, loss: 1.3689, correct: 244/1000: 100%|██████████| 50/50 [00:07<00:00,  6.26it/s]
+train acc: 24.4%
+Epoch: 8, correct: 81/286: 100%|██████████| 36/36 [00:01<00:00, 24.07it/s]
+test acc: 28.321678321678323%
+----------------
+ epoch:  8
+Epoch: 9, loss: 1.3912, correct: 265/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 26.5%
+Epoch: 9, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 26.79it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  9
+Epoch: 10, loss: 1.3689, correct: 279/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 27.900000000000002%
+Epoch: 10, correct: 81/286: 100%|██████████| 36/36 [00:01<00:00, 27.38it/s]
+test acc: 28.321678321678323%
+----------------
+ epoch:  10
+Epoch: 11, loss: 1.3846, correct: 294/1000: 100%|██████████| 50/50 [00:08<00:00,  6.20it/s]
+train acc: 29.4%
+Epoch: 11, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 27.09it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  11
+Epoch: 12, loss: 1.3575, correct: 332/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 33.2%
+Epoch: 12, correct: 84/286: 100%|██████████| 36/36 [00:01<00:00, 27.29it/s]
+test acc: 29.37062937062937%
+----------------
+ epoch:  12
+Epoch: 13, loss: 1.4392, correct: 340/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 34.0%
+Epoch: 13, correct: 76/286: 100%|██████████| 36/36 [00:01<00:00, 27.96it/s]
+test acc: 26.573426573426573%
+----------------
+ epoch:  13
+Epoch: 14, loss: 1.3646, correct: 340/1000: 100%|██████████| 50/50 [00:07<00:00,  6.28it/s]
+train acc: 34.0%
+Epoch: 14, correct: 75/286: 100%|██████████| 36/36 [00:01<00:00, 28.44it/s]
+test acc: 26.223776223776223%
+----------------
+ epoch:  14
+Epoch: 15, loss: 1.3490, correct: 331/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 33.1%
+Epoch: 15, correct: 79/286: 100%|██████████| 36/36 [00:01<00:00, 27.93it/s]
+test acc: 27.62237762237762%
+----------------
+ epoch:  15
+Epoch: 16, loss: 1.3783, correct: 365/1000: 100%|██████████| 50/50 [00:08<00:00,  6.20it/s]
+train acc: 36.5%
+Epoch: 16, correct: 77/286: 100%|██████████| 36/36 [00:01<00:00, 28.67it/s]
+test acc: 26.923076923076923%
+----------------
+ epoch:  16
+Epoch: 17, loss: 1.3605, correct: 366/1000: 100%|██████████| 50/50 [00:08<00:00,  6.12it/s]
+train acc: 36.6%
+Epoch: 17, correct: 81/286: 100%|██████████| 36/36 [00:01<00:00, 26.04it/s]
+test acc: 28.321678321678323%
+----------------
+ epoch:  17
+Epoch: 18, loss: 1.2775, correct: 376/1000: 100%|██████████| 50/50 [00:08<00:00,  6.19it/s]
+train acc: 37.6%
+Epoch: 18, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 28.67it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  18
+Epoch: 19, loss: 1.1230, correct: 373/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 37.3%
+Epoch: 19, correct: 91/286: 100%|██████████| 36/36 [00:01<00:00, 28.30it/s]
+test acc: 31.818181818181817%
+----------------
+ epoch:  19
+Epoch: 20, loss: 1.2331, correct: 393/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 39.300000000000004%
+Epoch: 20, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 27.80it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  20
+Epoch: 21, loss: 1.1877, correct: 407/1000: 100%|██████████| 50/50 [00:08<00:00,  6.19it/s]
+train acc: 40.699999999999996%
+Epoch: 21, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 25.07it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  21
+Epoch: 22, loss: 1.2040, correct: 403/1000: 100%|██████████| 50/50 [00:08<00:00,  6.04it/s]
+train acc: 40.300000000000004%
+Epoch: 22, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 26.98it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  22
+Epoch: 23, loss: 1.1510, correct: 435/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 43.5%
+Epoch: 23, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.28it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  23
+Epoch: 24, loss: 1.1597, correct: 470/1000: 100%|██████████| 50/50 [00:08<00:00,  6.19it/s]
+train acc: 47.0%
+Epoch: 24, correct: 83/286: 100%|██████████| 36/36 [00:01<00:00, 27.35it/s]
+test acc: 29.02097902097902%
+----------------
+ epoch:  24
+Epoch: 25, loss: 1.2414, correct: 475/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 47.5%
+Epoch: 25, correct: 94/286: 100%|██████████| 36/36 [00:01<00:00, 27.55it/s]
+test acc: 32.86713286713287%
+----------------
+ epoch:  25
+Epoch: 26, loss: 1.5036, correct: 493/1000: 100%|██████████| 50/50 [00:08<00:00,  6.03it/s]
+train acc: 49.3%
+Epoch: 26, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 28.03it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  26
+Epoch: 27, loss: 1.1224, correct: 502/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 50.2%
+Epoch: 27, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 27.61it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  27
+Epoch: 28, loss: 0.8031, correct: 532/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 53.2%
+Epoch: 28, correct: 103/286: 100%|██████████| 36/36 [00:01<00:00, 28.33it/s]
+test acc: 36.01398601398601%
+----------------
+ epoch:  28
+Epoch: 29, loss: 0.6977, correct: 563/1000: 100%|██████████| 50/50 [00:08<00:00,  6.19it/s]
+train acc: 56.3%
+Epoch: 29, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 28.03it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  29
+Epoch: 30, loss: 0.9315, correct: 601/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 60.099999999999994%
+Epoch: 30, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 25.65it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  30
+Epoch: 31, loss: 1.0783, correct: 621/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 62.1%
+Epoch: 31, correct: 96/286: 100%|██████████| 36/36 [00:01<00:00, 27.15it/s]
+test acc: 33.56643356643357%
+----------------
+ epoch:  31
+Epoch: 32, loss: 0.5431, correct: 673/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 67.30000000000001%
+Epoch: 32, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 28.34it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  32
+Epoch: 33, loss: 0.5468, correct: 717/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 71.7%
+Epoch: 33, correct: 85/286: 100%|██████████| 36/36 [00:01<00:00, 27.58it/s]
+test acc: 29.72027972027972%
+----------------
+ epoch:  33
+Epoch: 34, loss: 0.3622, correct: 746/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 74.6%
+Epoch: 34, correct: 91/286: 100%|██████████| 36/36 [00:01<00:00, 27.70it/s]
+test acc: 31.818181818181817%
+----------------
+ epoch:  34
+Epoch: 35, loss: 1.0285, correct: 797/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 79.7%
+Epoch: 35, correct: 88/286: 100%|██████████| 36/36 [00:01<00:00, 27.58it/s]
+test acc: 30.76923076923077%
+----------------
+ epoch:  35
+Epoch: 36, loss: 0.5004, correct: 844/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 84.39999999999999%
+Epoch: 36, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.90it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  36
+Epoch: 37, loss: 0.2700, correct: 882/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 88.2%
+Epoch: 37, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.53it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  37
+Epoch: 38, loss: 0.1754, correct: 907/1000: 100%|██████████| 50/50 [00:08<00:00,  6.15it/s]
+train acc: 90.7%
+Epoch: 38, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.85it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  38
+Epoch: 39, loss: 0.0954, correct: 908/1000: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]
+train acc: 90.8%
+Epoch: 39, correct: 91/286: 100%|██████████| 36/36 [00:01<00:00, 27.26it/s]
+test acc: 31.818181818181817%
+----------------
+ epoch:  39
+Epoch: 40, loss: 0.0758, correct: 948/1000: 100%|██████████| 50/50 [00:08<00:00,  6.01it/s]
+train acc: 94.8%
+Epoch: 40, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.40it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  40
+Epoch: 41, loss: 0.1427, correct: 939/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 93.89999999999999%
+Epoch: 41, correct: 86/286: 100%|██████████| 36/36 [00:01<00:00, 26.48it/s]
+test acc: 30.069930069930066%
+----------------
+ epoch:  41
+Epoch: 42, loss: 0.2700, correct: 967/1000: 100%|██████████| 50/50 [00:08<00:00,  6.15it/s]
+train acc: 96.7%
+Epoch: 42, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 27.67it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  42
+Epoch: 43, loss: 0.0232, correct: 982/1000: 100%|██████████| 50/50 [00:08<00:00,  6.01it/s]
+train acc: 98.2%
+Epoch: 43, correct: 80/286: 100%|██████████| 36/36 [00:01<00:00, 25.87it/s]
+test acc: 27.972027972027973%
+----------------
+ epoch:  43
+Epoch: 44, loss: 0.0752, correct: 974/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 97.39999999999999%
+Epoch: 44, correct: 84/286: 100%|██████████| 36/36 [00:01<00:00, 27.89it/s]
+test acc: 29.37062937062937%
+----------------
+ epoch:  44
+Epoch: 45, loss: 0.0636, correct: 964/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 96.39999999999999%
+Epoch: 45, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.64it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  45
+Epoch: 46, loss: 0.0090, correct: 981/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 98.1%
+Epoch: 46, correct: 86/286: 100%|██████████| 36/36 [00:01<00:00, 27.97it/s]
+test acc: 30.069930069930066%
+----------------
+ epoch:  46
+Epoch: 47, loss: 0.2503, correct: 976/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 97.6%
+Epoch: 47, correct: 82/286: 100%|██████████| 36/36 [00:01<00:00, 25.10it/s]
+test acc: 28.671328671328673%
+----------------
+ epoch:  47
+Epoch: 48, loss: 0.0195, correct: 987/1000: 100%|██████████| 50/50 [00:08<00:00,  6.03it/s]
+train acc: 98.7%
+Epoch: 48, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 27.45it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  48
+Epoch: 49, loss: 0.0042, correct: 990/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 99.0%
+Epoch: 49, correct: 88/286: 100%|██████████| 36/36 [00:01<00:00, 27.15it/s]
+test acc: 30.76923076923077%
+----------------
+ epoch:  49
+Epoch: 50, loss: 0.1630, correct: 979/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 97.89999999999999%
+Epoch: 50, correct: 78/286: 100%|██████████| 36/36 [00:01<00:00, 26.86it/s]
+test acc: 27.27272727272727%
+----------------
+ epoch:  50
+Epoch: 51, loss: 0.1858, correct: 973/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 97.3%
+Epoch: 51, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 27.75it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  51
+Epoch: 52, loss: 0.1658, correct: 979/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 97.89999999999999%
+Epoch: 52, correct: 84/286: 100%|██████████| 36/36 [00:01<00:00, 27.29it/s]
+test acc: 29.37062937062937%
+----------------
+ epoch:  52
+Epoch: 53, loss: 0.3096, correct: 989/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 98.9%
+Epoch: 53, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 26.82it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  53
+Epoch: 54, loss: 0.0050, correct: 992/1000: 100%|██████████| 50/50 [00:08<00:00,  6.12it/s]
+train acc: 99.2%
+Epoch: 54, correct: 88/286: 100%|██████████| 36/36 [00:01<00:00, 27.62it/s]
+test acc: 30.76923076923077%
+----------------
+ epoch:  54
+Epoch: 55, loss: 0.0404, correct: 987/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 98.7%
+Epoch: 55, correct: 85/286: 100%|██████████| 36/36 [00:01<00:00, 27.49it/s]
+test acc: 29.72027972027972%
+----------------
+ epoch:  55
+Epoch: 56, loss: 0.0120, correct: 992/1000: 100%|██████████| 50/50 [00:08<00:00,  5.98it/s]
+train acc: 99.2%
+Epoch: 56, correct: 84/286: 100%|██████████| 36/36 [00:01<00:00, 27.17it/s]
+test acc: 29.37062937062937%
+----------------
+ epoch:  56
+Epoch: 57, loss: 0.0118, correct: 989/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 98.9%
+Epoch: 57, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.65it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  57
+Epoch: 58, loss: 0.0579, correct: 986/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 98.6%
+Epoch: 58, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.09it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  58
+Epoch: 59, loss: 0.0080, correct: 992/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 99.2%
+Epoch: 59, correct: 85/286: 100%|██████████| 36/36 [00:01<00:00, 27.59it/s]
+test acc: 29.72027972027972%
+----------------
+ epoch:  59
+Epoch: 60, loss: 0.2224, correct: 985/1000: 100%|██████████| 50/50 [00:08<00:00,  5.96it/s]
+train acc: 98.5%
+Epoch: 60, correct: 76/286: 100%|██████████| 36/36 [00:01<00:00, 26.13it/s]
+test acc: 26.573426573426573%
+----------------
+ epoch:  60
+Epoch: 61, loss: 0.0043, correct: 985/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 98.5%
+Epoch: 61, correct: 94/286: 100%|██████████| 36/36 [00:01<00:00, 27.16it/s]
+test acc: 32.86713286713287%
+----------------
+ epoch:  61
+Epoch: 62, loss: 0.0010, correct: 981/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 98.1%
+Epoch: 62, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 27.28it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  62
+Epoch: 63, loss: 0.0108, correct: 988/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 98.8%
+Epoch: 63, correct: 86/286: 100%|██████████| 36/36 [00:01<00:00, 27.21it/s]
+test acc: 30.069930069930066%
+----------------
+ epoch:  63
+Epoch: 64, loss: 0.0019, correct: 997/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 99.7%
+Epoch: 64, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 23.77it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  64
+Epoch: 65, loss: 0.0000, correct: 998/1000: 100%|██████████| 50/50 [00:08<00:00,  6.01it/s]
+train acc: 99.8%
+Epoch: 65, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 27.18it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  65
+Epoch: 66, loss: 0.0400, correct: 998/1000: 100%|██████████| 50/50 [00:08<00:00,  6.00it/s]
+train acc: 99.8%
+Epoch: 66, correct: 96/286: 100%|██████████| 36/36 [00:01<00:00, 27.01it/s]
+test acc: 33.56643356643357%
+----------------
+ epoch:  66
+Epoch: 67, loss: 0.0011, correct: 999/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 99.9%
+Epoch: 67, correct: 91/286: 100%|██████████| 36/36 [00:01<00:00, 27.49it/s]
+test acc: 31.818181818181817%
+----------------
+ epoch:  67
+Epoch: 68, loss: 0.0000, correct: 999/1000: 100%|██████████| 50/50 [00:08<00:00,  6.12it/s]
+train acc: 99.9%
+Epoch: 68, correct: 94/286: 100%|██████████| 36/36 [00:01<00:00, 25.49it/s]
+test acc: 32.86713286713287%
+----------------
+ epoch:  68
+Epoch: 69, loss: 0.1706, correct: 992/1000: 100%|██████████| 50/50 [00:08<00:00,  5.96it/s]
+train acc: 99.2%
+Epoch: 69, correct: 84/286: 100%|██████████| 36/36 [00:01<00:00, 26.75it/s]
+test acc: 29.37062937062937%
+----------------
+ epoch:  69
+Epoch: 70, loss: 0.0026, correct: 981/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 98.1%
+Epoch: 70, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.41it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  70
+Epoch: 71, loss: 0.0025, correct: 987/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 98.7%
+Epoch: 71, correct: 88/286: 100%|██████████| 36/36 [00:01<00:00, 26.31it/s]
+test acc: 30.76923076923077%
+----------------
+ epoch:  71
+Epoch: 72, loss: 0.0004, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.04it/s]
+train acc: 100.0%
+Epoch: 72, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 25.80it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  72
+Epoch: 73, loss: 0.0017, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.98it/s]
+train acc: 100.0%
+Epoch: 73, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 27.87it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  73
+Epoch: 74, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 100.0%
+Epoch: 74, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.24it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  74
+Epoch: 75, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 100.0%
+Epoch: 75, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 26.87it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  75
+Epoch: 76, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 100.0%
+Epoch: 76, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 27.07it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  76
+Epoch: 77, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.01it/s]
+train acc: 100.0%
+Epoch: 77, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 25.91it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  77
+Epoch: 78, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 100.0%
+Epoch: 78, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 27.32it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  78
+Epoch: 79, loss: 0.0007, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.03it/s]
+train acc: 100.0%
+Epoch: 79, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.47it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  79
+Epoch: 80, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 100.0%
+Epoch: 80, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 26.92it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  80
+Epoch: 81, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 100.0%
+Epoch: 81, correct: 91/286: 100%|██████████| 36/36 [00:01<00:00, 26.13it/s]
+test acc: 31.818181818181817%
+----------------
+ epoch:  81
+Epoch: 82, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.96it/s]
+train acc: 100.0%
+Epoch: 82, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 26.93it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  82
+Epoch: 83, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 100.0%
+Epoch: 83, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 26.54it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  83
+Epoch: 84, loss: 0.0003, correct: 996/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 99.6%
+Epoch: 84, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 26.80it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  84
+Epoch: 85, loss: 0.0004, correct: 996/1000: 100%|██████████| 50/50 [00:08<00:00,  6.05it/s]
+train acc: 99.6%
+Epoch: 85, correct: 85/286: 100%|██████████| 36/36 [00:01<00:00, 26.94it/s]
+test acc: 29.72027972027972%
+----------------
+ epoch:  85
+Epoch: 86, loss: 0.0488, correct: 953/1000: 100%|██████████| 50/50 [00:08<00:00,  5.98it/s]
+train acc: 95.3%
+Epoch: 86, correct: 84/286: 100%|██████████| 36/36 [00:01<00:00, 27.47it/s]
+test acc: 29.37062937062937%
+----------------
+ epoch:  86
+Epoch: 87, loss: 0.0071, correct: 990/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 99.0%
+Epoch: 87, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.11it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  87
+Epoch: 88, loss: 0.0178, correct: 994/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 99.4%
+Epoch: 88, correct: 94/286: 100%|██████████| 36/36 [00:01<00:00, 27.00it/s]
+test acc: 32.86713286713287%
+----------------
+ epoch:  88
+Epoch: 89, loss: 0.0016, correct: 997/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 99.7%
+Epoch: 89, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.29it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  89
+Epoch: 90, loss: 0.0059, correct: 991/1000: 100%|██████████| 50/50 [00:08<00:00,  5.94it/s]
+train acc: 99.1%
+Epoch: 90, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 26.13it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  90
+Epoch: 91, loss: 0.0165, correct: 980/1000: 100%|██████████| 50/50 [00:08<00:00,  6.04it/s]
+train acc: 98.0%
+Epoch: 91, correct: 81/286: 100%|██████████| 36/36 [00:01<00:00, 26.13it/s]
+test acc: 28.321678321678323%
+----------------
+ epoch:  91
+Epoch: 92, loss: 0.0422, correct: 977/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 97.7%
+Epoch: 92, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 26.73it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  92
+Epoch: 93, loss: 0.0008, correct: 990/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 99.0%
+Epoch: 93, correct: 88/286: 100%|██████████| 36/36 [00:01<00:00, 27.05it/s]
+test acc: 30.76923076923077%
+----------------
+ epoch:  93
+Epoch: 94, loss: 0.0043, correct: 997/1000: 100%|██████████| 50/50 [00:08<00:00,  5.99it/s]
+train acc: 99.7%
+Epoch: 94, correct: 87/286: 100%|██████████| 36/36 [00:01<00:00, 23.86it/s]
+test acc: 30.419580419580424%
+----------------
+ epoch:  94
+Epoch: 95, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 100.0%
+Epoch: 95, correct: 91/286: 100%|██████████| 36/36 [00:01<00:00, 27.09it/s]
+test acc: 31.818181818181817%
+----------------
+ epoch:  95
+Epoch: 96, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 100.0%
+Epoch: 96, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 27.15it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  96
+Epoch: 97, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.05it/s]
+train acc: 100.0%
+Epoch: 97, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.28it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  97
+Epoch: 98, loss: 0.0004, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 100.0%
+Epoch: 98, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 25.33it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  98
+Epoch: 99, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.95it/s]
+train acc: 100.0%
+Epoch: 99, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 27.01it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  99
+Epoch: 100, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 100.0%
+Epoch: 100, correct: 88/286: 100%|██████████| 36/36 [00:01<00:00, 26.67it/s]
+test acc: 30.76923076923077%
+---------------------------
+0000.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0001.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0002.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0003.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0004.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0005.png predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0006.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0007.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0008.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0009.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0010.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0011.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0012.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0013.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0014.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0015.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0016.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0017.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0018.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0019.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0020.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0021.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0022.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0023.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0024.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0025.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0026.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0027.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0028.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0029.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0030.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0031.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0032.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0033.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0034.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0035.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0036.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0037.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0038.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0039.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0040.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0041.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0042.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0043.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0044.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0045.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0046.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0047.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0048.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0049.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0050.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0051.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0052.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0053.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0054.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0055.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0056.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0057.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0058.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0059.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0060.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0061.jpg predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0062.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0063.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0064.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0065.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0066.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0067.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0068.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0069.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0070.jpg predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0000.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0001.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0002.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0003.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0004.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0005.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0006.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0007.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0008.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0009.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0010.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0011.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0012.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0013.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0014.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0015.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0016.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0017.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0018.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0019.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0020.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0021.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0022.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0023.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0024.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0025.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0026.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0027.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0028.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0029.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0030.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0031.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0032.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0033.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0034.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0035.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0036.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0037.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0038.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0039.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0040.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0041.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0042.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0043.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0044.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0045.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0046.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0047.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0048.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0049.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0050.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0051.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0052.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0053.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0054.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0055.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0056.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0057.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0058.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0059.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0060.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0061.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0062.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0063.jpg predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0064.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0065.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0066.jpg predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0067.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0068.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0069.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0072.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0000.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0001.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0002.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0003.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0004.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0005.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0006.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0007.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0008.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0009.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0010.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0011.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0012.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0013.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0014.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0015.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0016.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0017.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0018.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0019.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0020.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0021.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0022.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0023.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0024.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0025.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0026.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0027.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0028.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0029.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0030.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0031.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0032.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0033.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0034.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0035.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0036.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0037.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0038.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0039.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0040.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0041.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0042.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0043.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0044.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0045.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0046.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0047.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0048.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0049.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0050.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0051.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0052.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0053.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0054.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0055.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0056.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0057.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0058.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0059.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0060.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0061.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0062.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0063.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0064.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0065.jpg predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0066.jpg predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0067.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0068.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0069.jpg predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0070.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0071.jpg predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0000.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0001.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0002.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0003.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0004.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0005.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0006.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0007.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0008.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0009.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0010.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0011.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0012.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0013.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0014.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0015.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0016.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0017.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0018.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0019.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0020.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0021.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0022.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0023.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0024.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0025.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0026.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0027.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0028.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0029.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0030.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0031.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0032.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0033.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0034.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0035.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0036.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0037.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0038.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0039.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0040.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0041.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0042.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0043.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0044.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0045.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0046.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0047.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0048.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0049.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0050.jpg predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0051.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0052.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0053.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0054.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0055.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0056.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0057.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0058.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0059.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0060.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0061.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0062.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0063.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0064.jpg predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0065.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0066.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0067.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0068.jpg predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0069.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0070.jpg predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0071.jpg predicted: tensor([3], device='cuda:0'), label: 3
+
+
+
+
+
+
+
+
+
+/////////////////////////////////////////////////////////
+
+
+
+Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount("/content/drive", force_remount=True).
+VGG(
+  (cnn): Sequential(
+    (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (1): ReLU()
+    (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (3): ReLU()
+    (4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (5): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (6): ReLU()
+    (7): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (8): ReLU()
+    (9): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (10): Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (11): ReLU()
+    (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (13): ReLU()
+    (14): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (15): ReLU()
+    (16): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (17): Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (18): ReLU()
+    (19): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (20): ReLU()
+    (21): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (22): ReLU()
+    (23): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (24): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (25): ReLU()
+    (26): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (27): ReLU()
+    (28): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (29): ReLU()
+    (30): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  )
+  (fc): Sequential(
+    (0): Linear(in_features=8192, out_features=4096, bias=True)
+    (1): ReLU()
+    (2): Dropout(p=0.5, inplace=False)
+    (3): Linear(in_features=4096, out_features=2048, bias=True)
+    (4): ReLU()
+    (5): Dropout(p=0.5, inplace=False)
+    (6): Linear(in_features=2048, out_features=4, bias=True)
+  )
+)
+USE 1 GPUs!
+----------------
+ epoch:  0
+Epoch: 1, loss: 1.3870, correct: 234/1000: 100%|██████████| 50/50 [00:08<00:00,  6.19it/s]
+train acc: 23.400000000000002%
+Epoch: 1, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 26.74it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  1
+Epoch: 2, loss: 1.3874, correct: 236/1000: 100%|██████████| 50/50 [00:07<00:00,  6.36it/s]
+train acc: 23.599999999999998%
+Epoch: 2, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 29.00it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  2
+Epoch: 3, loss: 1.3854, correct: 247/1000: 100%|██████████| 50/50 [00:07<00:00,  6.39it/s]
+train acc: 24.7%
+Epoch: 3, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.78it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  3
+Epoch: 4, loss: 1.3855, correct: 248/1000: 100%|██████████| 50/50 [00:07<00:00,  6.40it/s]
+train acc: 24.8%
+Epoch: 4, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 28.87it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  4
+Epoch: 5, loss: 1.3872, correct: 252/1000: 100%|██████████| 50/50 [00:08<00:00,  6.24it/s]
+train acc: 25.2%
+Epoch: 5, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 25.48it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  5
+Epoch: 6, loss: 1.3870, correct: 236/1000: 100%|██████████| 50/50 [00:07<00:00,  6.34it/s]
+train acc: 23.599999999999998%
+Epoch: 6, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.76it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  6
+Epoch: 7, loss: 1.3875, correct: 243/1000: 100%|██████████| 50/50 [00:07<00:00,  6.31it/s]
+train acc: 24.3%
+Epoch: 7, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.25it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  7
+Epoch: 8, loss: 1.3859, correct: 242/1000: 100%|██████████| 50/50 [00:07<00:00,  6.27it/s]
+train acc: 24.2%
+Epoch: 8, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 27.92it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  8
+Epoch: 9, loss: 1.3889, correct: 253/1000: 100%|██████████| 50/50 [00:08<00:00,  6.17it/s]
+train acc: 25.3%
+Epoch: 9, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 27.80it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  9
+Epoch: 10, loss: 1.3870, correct: 255/1000: 100%|██████████| 50/50 [00:07<00:00,  6.31it/s]
+train acc: 25.5%
+Epoch: 10, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.29it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  10
+Epoch: 11, loss: 1.3874, correct: 221/1000: 100%|██████████| 50/50 [00:07<00:00,  6.29it/s]
+train acc: 22.1%
+Epoch: 11, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.02it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  11
+Epoch: 12, loss: 1.3875, correct: 252/1000: 100%|██████████| 50/50 [00:07<00:00,  6.29it/s]
+train acc: 25.2%
+Epoch: 12, correct: 71/286: 100%|██████████| 36/36 [00:01<00:00, 28.45it/s]
+test acc: 24.825174825174827%
+----------------
+ epoch:  12
+Epoch: 13, loss: 1.3855, correct: 241/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 24.099999999999998%
+Epoch: 13, correct: 72/286: 100%|██████████| 36/36 [00:01<00:00, 26.87it/s]
+test acc: 25.174825174825177%
+----------------
+ epoch:  13
+Epoch: 14, loss: 1.3873, correct: 239/1000: 100%|██████████| 50/50 [00:07<00:00,  6.29it/s]
+train acc: 23.9%
+Epoch: 14, correct: 73/286: 100%|██████████| 36/36 [00:01<00:00, 28.78it/s]
+test acc: 25.524475524475527%
+----------------
+ epoch:  14
+Epoch: 15, loss: 1.3933, correct: 235/1000: 100%|██████████| 50/50 [00:07<00:00,  6.27it/s]
+train acc: 23.5%
+Epoch: 15, correct: 102/286: 100%|██████████| 36/36 [00:01<00:00, 28.61it/s]
+test acc: 35.66433566433567%
+----------------
+ epoch:  15
+Epoch: 16, loss: 1.4000, correct: 264/1000: 100%|██████████| 50/50 [00:07<00:00,  6.27it/s]
+train acc: 26.400000000000002%
+Epoch: 16, correct: 83/286: 100%|██████████| 36/36 [00:01<00:00, 28.49it/s]
+test acc: 29.02097902097902%
+----------------
+ epoch:  16
+Epoch: 17, loss: 1.4175, correct: 295/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 29.5%
+Epoch: 17, correct: 102/286: 100%|██████████| 36/36 [00:01<00:00, 26.48it/s]
+test acc: 35.66433566433567%
+----------------
+ epoch:  17
+Epoch: 18, loss: 1.3882, correct: 303/1000: 100%|██████████| 50/50 [00:08<00:00,  6.24it/s]
+train acc: 30.3%
+Epoch: 18, correct: 111/286: 100%|██████████| 36/36 [00:01<00:00, 28.42it/s]
+test acc: 38.81118881118881%
+----------------
+ epoch:  18
+Epoch: 19, loss: 1.3403, correct: 276/1000: 100%|██████████| 50/50 [00:07<00:00,  6.26it/s]
+train acc: 27.6%
+Epoch: 19, correct: 107/286: 100%|██████████| 36/36 [00:01<00:00, 28.22it/s]
+test acc: 37.41258741258741%
+----------------
+ epoch:  19
+Epoch: 20, loss: 1.3505, correct: 305/1000: 100%|██████████| 50/50 [00:08<00:00,  6.23it/s]
+train acc: 30.5%
+Epoch: 20, correct: 104/286: 100%|██████████| 36/36 [00:01<00:00, 28.49it/s]
+test acc: 36.36363636363637%
+----------------
+ epoch:  20
+Epoch: 21, loss: 1.3338, correct: 319/1000: 100%|██████████| 50/50 [00:08<00:00,  6.17it/s]
+train acc: 31.900000000000002%
+Epoch: 21, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 25.37it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  21
+Epoch: 22, loss: 1.3902, correct: 322/1000: 100%|██████████| 50/50 [00:08<00:00,  6.20it/s]
+train acc: 32.2%
+Epoch: 22, correct: 106/286: 100%|██████████| 36/36 [00:01<00:00, 28.41it/s]
+test acc: 37.06293706293706%
+----------------
+ epoch:  22
+Epoch: 23, loss: 1.3212, correct: 307/1000: 100%|██████████| 50/50 [00:08<00:00,  6.25it/s]
+train acc: 30.7%
+Epoch: 23, correct: 82/286: 100%|██████████| 36/36 [00:01<00:00, 28.62it/s]
+test acc: 28.671328671328673%
+----------------
+ epoch:  23
+Epoch: 24, loss: 1.3401, correct: 326/1000: 100%|██████████| 50/50 [00:07<00:00,  6.26it/s]
+train acc: 32.6%
+Epoch: 24, correct: 105/286: 100%|██████████| 36/36 [00:01<00:00, 27.62it/s]
+test acc: 36.71328671328671%
+----------------
+ epoch:  24
+Epoch: 25, loss: 1.2522, correct: 343/1000: 100%|██████████| 50/50 [00:08<00:00,  6.15it/s]
+train acc: 34.300000000000004%
+Epoch: 25, correct: 112/286: 100%|██████████| 36/36 [00:01<00:00, 26.19it/s]
+test acc: 39.16083916083916%
+----------------
+ epoch:  25
+Epoch: 26, loss: 1.3579, correct: 339/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 33.900000000000006%
+Epoch: 26, correct: 113/286: 100%|██████████| 36/36 [00:01<00:00, 28.32it/s]
+test acc: 39.51048951048951%
+----------------
+ epoch:  26
+Epoch: 27, loss: 1.3162, correct: 368/1000: 100%|██████████| 50/50 [00:08<00:00,  6.20it/s]
+train acc: 36.8%
+Epoch: 27, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 28.10it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  27
+Epoch: 28, loss: 1.1004, correct: 395/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 39.5%
+Epoch: 28, correct: 103/286: 100%|██████████| 36/36 [00:01<00:00, 27.98it/s]
+test acc: 36.01398601398601%
+----------------
+ epoch:  28
+Epoch: 29, loss: 1.2588, correct: 416/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 41.6%
+Epoch: 29, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 25.97it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  29
+Epoch: 30, loss: 1.1892, correct: 424/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 42.4%
+Epoch: 30, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 28.13it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  30
+Epoch: 31, loss: 1.2947, correct: 435/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 43.5%
+Epoch: 31, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 27.68it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  31
+Epoch: 32, loss: 1.3120, correct: 444/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 44.4%
+Epoch: 32, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 28.07it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  32
+Epoch: 33, loss: 1.2608, correct: 460/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 46.0%
+Epoch: 33, correct: 107/286: 100%|██████████| 36/36 [00:01<00:00, 27.11it/s]
+test acc: 37.41258741258741%
+----------------
+ epoch:  33
+Epoch: 34, loss: 1.2674, correct: 485/1000: 100%|██████████| 50/50 [00:08<00:00,  6.17it/s]
+train acc: 48.5%
+Epoch: 34, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 28.33it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  34
+Epoch: 35, loss: 1.1890, correct: 469/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 46.9%
+Epoch: 35, correct: 89/286: 100%|██████████| 36/36 [00:01<00:00, 28.05it/s]
+test acc: 31.11888111888112%
+----------------
+ epoch:  35
+Epoch: 36, loss: 1.1812, correct: 497/1000: 100%|██████████| 50/50 [00:08<00:00,  6.21it/s]
+train acc: 49.7%
+Epoch: 36, correct: 107/286: 100%|██████████| 36/36 [00:01<00:00, 27.99it/s]
+test acc: 37.41258741258741%
+----------------
+ epoch:  36
+Epoch: 37, loss: 1.2853, correct: 516/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 51.6%
+Epoch: 37, correct: 102/286: 100%|██████████| 36/36 [00:01<00:00, 26.71it/s]
+test acc: 35.66433566433567%
+----------------
+ epoch:  37
+Epoch: 38, loss: 1.1659, correct: 524/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 52.400000000000006%
+Epoch: 38, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 28.10it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  38
+Epoch: 39, loss: 1.0164, correct: 565/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 56.49999999999999%
+Epoch: 39, correct: 90/286: 100%|██████████| 36/36 [00:01<00:00, 28.59it/s]
+test acc: 31.46853146853147%
+----------------
+ epoch:  39
+Epoch: 40, loss: 0.8190, correct: 585/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 58.5%
+Epoch: 40, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.37it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  40
+Epoch: 41, loss: 0.8842, correct: 621/1000: 100%|██████████| 50/50 [00:08<00:00,  5.94it/s]
+train acc: 62.1%
+Epoch: 41, correct: 99/286: 100%|██████████| 36/36 [00:01<00:00, 27.45it/s]
+test acc: 34.61538461538461%
+----------------
+ epoch:  41
+Epoch: 42, loss: 0.7176, correct: 639/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 63.9%
+Epoch: 42, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 28.09it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  42
+Epoch: 43, loss: 0.9496, correct: 687/1000: 100%|██████████| 50/50 [00:08<00:00,  6.17it/s]
+train acc: 68.7%
+Epoch: 43, correct: 106/286: 100%|██████████| 36/36 [00:01<00:00, 27.47it/s]
+test acc: 37.06293706293706%
+----------------
+ epoch:  43
+Epoch: 44, loss: 0.5754, correct: 722/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 72.2%
+Epoch: 44, correct: 103/286: 100%|██████████| 36/36 [00:01<00:00, 28.15it/s]
+test acc: 36.01398601398601%
+----------------
+ epoch:  44
+Epoch: 45, loss: 0.5955, correct: 762/1000: 100%|██████████| 50/50 [00:08<00:00,  6.01it/s]
+train acc: 76.2%
+Epoch: 45, correct: 103/286: 100%|██████████| 36/36 [00:01<00:00, 27.81it/s]
+test acc: 36.01398601398601%
+----------------
+ epoch:  45
+Epoch: 46, loss: 0.3713, correct: 814/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 81.39999999999999%
+Epoch: 46, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.58it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  46
+Epoch: 47, loss: 0.3116, correct: 872/1000: 100%|██████████| 50/50 [00:08<00:00,  6.18it/s]
+train acc: 87.2%
+Epoch: 47, correct: 109/286: 100%|██████████| 36/36 [00:01<00:00, 27.45it/s]
+test acc: 38.111888111888106%
+----------------
+ epoch:  47
+Epoch: 48, loss: 0.1739, correct: 869/1000: 100%|██████████| 50/50 [00:08<00:00,  6.12it/s]
+train acc: 86.9%
+Epoch: 48, correct: 99/286: 100%|██████████| 36/36 [00:01<00:00, 28.12it/s]
+test acc: 34.61538461538461%
+----------------
+ epoch:  48
+Epoch: 49, loss: 0.1237, correct: 911/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 91.10000000000001%
+Epoch: 49, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.65it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  49
+Epoch: 50, loss: 0.1086, correct: 919/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 91.9%
+Epoch: 50, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 27.68it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  50
+Epoch: 51, loss: 0.3612, correct: 931/1000: 100%|██████████| 50/50 [00:08<00:00,  6.12it/s]
+train acc: 93.10000000000001%
+Epoch: 51, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 28.09it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  51
+Epoch: 52, loss: 0.0594, correct: 962/1000: 100%|██████████| 50/50 [00:08<00:00,  6.17it/s]
+train acc: 96.2%
+Epoch: 52, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 27.53it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  52
+Epoch: 53, loss: 0.0168, correct: 974/1000: 100%|██████████| 50/50 [00:08<00:00,  6.03it/s]
+train acc: 97.39999999999999%
+Epoch: 53, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.63it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  53
+Epoch: 54, loss: 0.3767, correct: 957/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 95.7%
+Epoch: 54, correct: 96/286: 100%|██████████| 36/36 [00:01<00:00, 27.80it/s]
+test acc: 33.56643356643357%
+----------------
+ epoch:  54
+Epoch: 55, loss: 0.1341, correct: 971/1000: 100%|██████████| 50/50 [00:08<00:00,  6.15it/s]
+train acc: 97.1%
+Epoch: 55, correct: 99/286: 100%|██████████| 36/36 [00:01<00:00, 27.56it/s]
+test acc: 34.61538461538461%
+----------------
+ epoch:  55
+Epoch: 56, loss: 0.0179, correct: 993/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 99.3%
+Epoch: 56, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.66it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  56
+Epoch: 57, loss: 0.0635, correct: 971/1000: 100%|██████████| 50/50 [00:08<00:00,  6.03it/s]
+train acc: 97.1%
+Epoch: 57, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 26.89it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  57
+Epoch: 58, loss: 0.0583, correct: 973/1000: 100%|██████████| 50/50 [00:08<00:00,  6.16it/s]
+train acc: 97.3%
+Epoch: 58, correct: 107/286: 100%|██████████| 36/36 [00:01<00:00, 27.38it/s]
+test acc: 37.41258741258741%
+----------------
+ epoch:  58
+Epoch: 59, loss: 0.0064, correct: 985/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 98.5%
+Epoch: 59, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 27.71it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  59
+Epoch: 60, loss: 0.0016, correct: 992/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 99.2%
+Epoch: 60, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 27.09it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  60
+Epoch: 61, loss: 0.0795, correct: 977/1000: 100%|██████████| 50/50 [00:08<00:00,  5.96it/s]
+train acc: 97.7%
+Epoch: 61, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 27.70it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  61
+Epoch: 62, loss: 0.0048, correct: 996/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 99.6%
+Epoch: 62, correct: 96/286: 100%|██████████| 36/36 [00:01<00:00, 27.92it/s]
+test acc: 33.56643356643357%
+----------------
+ epoch:  62
+Epoch: 63, loss: 0.0394, correct: 991/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 99.1%
+Epoch: 63, correct: 98/286: 100%|██████████| 36/36 [00:01<00:00, 27.31it/s]
+test acc: 34.26573426573427%
+----------------
+ epoch:  63
+Epoch: 64, loss: 0.0172, correct: 997/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 99.7%
+Epoch: 64, correct: 92/286: 100%|██████████| 36/36 [00:01<00:00, 27.66it/s]
+test acc: 32.16783216783217%
+----------------
+ epoch:  64
+Epoch: 65, loss: 0.0037, correct: 999/1000: 100%|██████████| 50/50 [00:08<00:00,  5.99it/s]
+train acc: 99.9%
+Epoch: 65, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 27.41it/s]
+test acc: 32.51748251748251%
+----------------
+ epoch:  65
+Epoch: 66, loss: 0.0040, correct: 998/1000: 100%|██████████| 50/50 [00:08<00:00,  6.17it/s]
+train acc: 99.8%
+Epoch: 66, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 27.17it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  66
+Epoch: 67, loss: 0.0010, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 100.0%
+Epoch: 67, correct: 98/286: 100%|██████████| 36/36 [00:01<00:00, 27.65it/s]
+test acc: 34.26573426573427%
+----------------
+ epoch:  67
+Epoch: 68, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 100.0%
+Epoch: 68, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 27.30it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  68
+Epoch: 69, loss: 0.0016, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.98it/s]
+train acc: 100.0%
+Epoch: 69, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 27.64it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  69
+Epoch: 70, loss: 0.0154, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 100.0%
+Epoch: 70, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.46it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  70
+Epoch: 71, loss: 0.0001, correct: 993/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 99.3%
+Epoch: 71, correct: 102/286: 100%|██████████| 36/36 [00:01<00:00, 27.22it/s]
+test acc: 35.66433566433567%
+----------------
+ epoch:  71
+Epoch: 72, loss: 0.2222, correct: 941/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 94.1%
+Epoch: 72, correct: 102/286: 100%|██████████| 36/36 [00:01<00:00, 27.63it/s]
+test acc: 35.66433566433567%
+----------------
+ epoch:  72
+Epoch: 73, loss: 0.3182, correct: 976/1000: 100%|██████████| 50/50 [00:08<00:00,  5.91it/s]
+train acc: 97.6%
+Epoch: 73, correct: 108/286: 100%|██████████| 36/36 [00:01<00:00, 26.45it/s]
+test acc: 37.76223776223776%
+----------------
+ epoch:  73
+Epoch: 74, loss: 0.0084, correct: 989/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 98.9%
+Epoch: 74, correct: 98/286: 100%|██████████| 36/36 [00:01<00:00, 27.00it/s]
+test acc: 34.26573426573427%
+----------------
+ epoch:  74
+Epoch: 75, loss: 0.0031, correct: 994/1000: 100%|██████████| 50/50 [00:08<00:00,  6.15it/s]
+train acc: 99.4%
+Epoch: 75, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 26.84it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  75
+Epoch: 76, loss: 0.0010, correct: 999/1000: 100%|██████████| 50/50 [00:08<00:00,  6.09it/s]
+train acc: 99.9%
+Epoch: 76, correct: 99/286: 100%|██████████| 36/36 [00:01<00:00, 26.30it/s]
+test acc: 34.61538461538461%
+----------------
+ epoch:  76
+Epoch: 77, loss: 0.0027, correct: 988/1000: 100%|██████████| 50/50 [00:08<00:00,  5.92it/s]
+train acc: 98.8%
+Epoch: 77, correct: 96/286: 100%|██████████| 36/36 [00:01<00:00, 27.30it/s]
+test acc: 33.56643356643357%
+----------------
+ epoch:  77
+Epoch: 78, loss: 0.0603, correct: 989/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 98.9%
+Epoch: 78, correct: 102/286: 100%|██████████| 36/36 [00:01<00:00, 27.42it/s]
+test acc: 35.66433566433567%
+----------------
+ epoch:  78
+Epoch: 79, loss: 0.0580, correct: 975/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 97.5%
+Epoch: 79, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 27.11it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  79
+Epoch: 80, loss: 0.0035, correct: 997/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 99.7%
+Epoch: 80, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 27.64it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  80
+Epoch: 81, loss: 0.0008, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.04it/s]
+train acc: 100.0%
+Epoch: 81, correct: 99/286: 100%|██████████| 36/36 [00:01<00:00, 26.85it/s]
+test acc: 34.61538461538461%
+----------------
+ epoch:  81
+Epoch: 82, loss: 0.0006, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.14it/s]
+train acc: 100.0%
+Epoch: 82, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 27.29it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  82
+Epoch: 83, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 100.0%
+Epoch: 83, correct: 101/286: 100%|██████████| 36/36 [00:01<00:00, 27.04it/s]
+test acc: 35.31468531468531%
+----------------
+ epoch:  83
+Epoch: 84, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.12it/s]
+train acc: 100.0%
+Epoch: 84, correct: 103/286: 100%|██████████| 36/36 [00:01<00:00, 27.19it/s]
+test acc: 36.01398601398601%
+----------------
+ epoch:  84
+Epoch: 85, loss: 0.0001, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.90it/s]
+train acc: 100.0%
+Epoch: 85, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 26.72it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  85
+Epoch: 86, loss: 0.0019, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.10it/s]
+train acc: 100.0%
+Epoch: 86, correct: 99/286: 100%|██████████| 36/36 [00:01<00:00, 27.22it/s]
+test acc: 34.61538461538461%
+----------------
+ epoch:  86
+Epoch: 87, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 100.0%
+Epoch: 87, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 26.94it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  87
+Epoch: 88, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 100.0%
+Epoch: 88, correct: 100/286: 100%|██████████| 36/36 [00:01<00:00, 27.46it/s]
+test acc: 34.96503496503497%
+----------------
+ epoch:  88
+Epoch: 89, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.95it/s]
+train acc: 100.0%
+Epoch: 89, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 26.38it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  89
+Epoch: 90, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.13it/s]
+train acc: 100.0%
+Epoch: 90, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 27.33it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  90
+Epoch: 91, loss: 0.0006, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.07it/s]
+train acc: 100.0%
+Epoch: 91, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 26.55it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  91
+Epoch: 92, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.05it/s]
+train acc: 100.0%
+Epoch: 92, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 26.52it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  92
+Epoch: 93, loss: 0.0002, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  5.96it/s]
+train acc: 100.0%
+Epoch: 93, correct: 96/286: 100%|██████████| 36/36 [00:01<00:00, 26.73it/s]
+test acc: 33.56643356643357%
+----------------
+ epoch:  93
+Epoch: 94, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 100.0%
+Epoch: 94, correct: 95/286: 100%|██████████| 36/36 [00:01<00:00, 26.82it/s]
+test acc: 33.21678321678322%
+----------------
+ epoch:  94
+Epoch: 95, loss: 0.0000, correct: 1000/1000: 100%|██████████| 50/50 [00:08<00:00,  6.06it/s]
+train acc: 100.0%
+Epoch: 95, correct: 97/286: 100%|██████████| 36/36 [00:01<00:00, 26.11it/s]
+test acc: 33.91608391608392%
+----------------
+ epoch:  95
+Epoch: 96, loss: 0.0052, correct: 999/1000: 100%|██████████| 50/50 [00:08<00:00,  6.11it/s]
+train acc: 99.9%
+Epoch: 96, correct: 85/286: 100%|██████████| 36/36 [00:01<00:00, 26.87it/s]
+test acc: 29.72027972027972%
+----------------
+ epoch:  96
+Epoch: 97, loss: 0.0232, correct: 988/1000: 100%|██████████| 50/50 [00:08<00:00,  5.97it/s]
+train acc: 98.8%
+Epoch: 97, correct: 103/286: 100%|██████████| 36/36 [00:01<00:00, 27.04it/s]
+test acc: 36.01398601398601%
+----------------
+ epoch:  97
+Epoch: 98, loss: 0.0908, correct: 916/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 91.60000000000001%
+Epoch: 98, correct: 111/286: 100%|██████████| 36/36 [00:01<00:00, 27.02it/s]
+test acc: 38.81118881118881%
+----------------
+ epoch:  98
+Epoch: 99, loss: 0.0015, correct: 993/1000: 100%|██████████| 50/50 [00:08<00:00,  6.02it/s]
+train acc: 99.3%
+Epoch: 99, correct: 105/286: 100%|██████████| 36/36 [00:01<00:00, 27.35it/s]
+test acc: 36.71328671328671%
+----------------
+ epoch:  99
+Epoch: 100, loss: 0.0055, correct: 998/1000: 100%|██████████| 50/50 [00:08<00:00,  6.08it/s]
+train acc: 99.8%
+Epoch: 100, correct: 93/286: 100%|██████████| 36/36 [00:01<00:00, 26.86it/s]
+test acc: 32.51748251748251%
+---------------------------
+0000.jpg tensor([[  5.4178,   9.2482, -14.5581,   2.5654]], device='cuda:0')
+tensor([[  5.4178,   9.2482, -14.5581,   2.5654]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0001.jpg tensor([[-13.1992,   4.2263,   7.5134,   4.2221]], device='cuda:0')
+tensor([[-13.1992,   4.2263,   7.5134,   4.2221]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0002.jpg tensor([[ 4.2503,  0.1675, -9.5357,  7.2277]], device='cuda:0')
+tensor([[ 4.2503,  0.1675, -9.5357,  7.2277]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0003.jpg tensor([[ 11.0795, -15.2557,  -4.3882,   9.3959]], device='cuda:0')
+tensor([[ 11.0795, -15.2557,  -4.3882,   9.3959]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0004.jpg tensor([[ -3.4506, -11.1038,   8.1445,   7.8521]], device='cuda:0')
+tensor([[ -3.4506, -11.1038,   8.1445,   7.8521]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0005.png tensor([[-6.6671, -1.2133,  7.8268,  2.3790]], device='cuda:0')
+tensor([[-6.6671, -1.2133,  7.8268,  2.3790]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0006.jpg tensor([[ 1.2907, -5.9189,  0.1913,  5.4396]], device='cuda:0')
+tensor([[ 1.2907, -5.9189,  0.1913,  5.4396]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0007.jpg tensor([[-2.5221,  6.9750, -5.0256,  1.7862]], device='cuda:0')
+tensor([[-2.5221,  6.9750, -5.0256,  1.7862]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0008.jpg tensor([[ 14.5638, -12.9626,  -3.4412,   3.9560]], device='cuda:0')
+tensor([[ 14.5638, -12.9626,  -3.4412,   3.9560]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0009.jpg tensor([[ 3.2794, -7.3916, -2.6065,  8.4094]], device='cuda:0')
+tensor([[ 3.2794, -7.3916, -2.6065,  8.4094]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0010.jpg tensor([[-1.1146, -3.3919,  5.4133, -0.4644]], device='cuda:0')
+tensor([[-1.1146, -3.3919,  5.4133, -0.4644]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0011.jpg tensor([[ 1.8543, -2.8869, -0.3739,  2.2842]], device='cuda:0')
+tensor([[ 1.8543, -2.8869, -0.3739,  2.2842]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0012.jpg tensor([[ 4.7279, -3.5480, -1.4468,  1.1615]], device='cuda:0')
+tensor([[ 4.7279, -3.5480, -1.4468,  1.1615]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0013.jpg tensor([[11.9137, -2.9487, -9.2223,  1.4403]], device='cuda:0')
+tensor([[11.9137, -2.9487, -9.2223,  1.4403]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0014.jpg tensor([[ 1.8180, -3.5846,  1.6343,  0.6309]], device='cuda:0')
+tensor([[ 1.8180, -3.5846,  1.6343,  0.6309]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0015.jpg tensor([[  7.5381, -10.0632,  -1.5017,   5.6088]], device='cuda:0')
+tensor([[  7.5381, -10.0632,  -1.5017,   5.6088]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0016.jpg tensor([[ 3.9945, -8.5234,  2.3151,  4.7517]], device='cuda:0')
+tensor([[ 3.9945, -8.5234,  2.3151,  4.7517]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0017.jpg tensor([[-7.1800,  9.1064,  5.2437, -4.7487]], device='cuda:0')
+tensor([[-7.1800,  9.1064,  5.2437, -4.7487]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0018.jpg tensor([[  3.6612,   9.7473, -10.3982,  -1.1313]], device='cuda:0')
+tensor([[  3.6612,   9.7473, -10.3982,  -1.1313]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0019.jpg tensor([[  9.8831,  -0.1557, -11.0087,   2.3600]], device='cuda:0')
+tensor([[  9.8831,  -0.1557, -11.0087,   2.3600]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0020.jpg tensor([[ 3.7498, -0.3186, -1.3718,  0.4943]], device='cuda:0')
+tensor([[ 3.7498, -0.3186, -1.3718,  0.4943]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0021.jpg tensor([[ 5.6118, -2.1131, -5.3332,  2.5200]], device='cuda:0')
+tensor([[ 5.6118, -2.1131, -5.3332,  2.5200]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0022.jpg tensor([[-2.8972, -4.5925,  5.2770,  3.4057]], device='cuda:0')
+tensor([[-2.8972, -4.5925,  5.2770,  3.4057]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0023.jpg tensor([[ 5.0554, -8.0336, -0.2604,  3.6848]], device='cuda:0')
+tensor([[ 5.0554, -8.0336, -0.2604,  3.6848]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0024.jpg tensor([[11.8234, -6.2248, -6.5306,  1.3510]], device='cuda:0')
+tensor([[11.8234, -6.2248, -6.5306,  1.3510]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0025.jpg tensor([[ 4.7931, -3.0363, -5.3900,  6.1411]], device='cuda:0')
+tensor([[ 4.7931, -3.0363, -5.3900,  6.1411]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0026.jpg tensor([[ 7.5278,  7.2379, -8.4321, -4.6959]], device='cuda:0')
+tensor([[ 7.5278,  7.2379, -8.4321, -4.6959]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0027.jpg tensor([[ 4.3351, -5.4113, -2.8490,  4.5230]], device='cuda:0')
+tensor([[ 4.3351, -5.4113, -2.8490,  4.5230]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0028.jpg tensor([[-4.5074,  6.7805, -3.1325,  1.9722]], device='cuda:0')
+tensor([[-4.5074,  6.7805, -3.1325,  1.9722]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0029.jpg tensor([[ 1.8630,  4.4855, -7.4721,  2.7703]], device='cuda:0')
+tensor([[ 1.8630,  4.4855, -7.4721,  2.7703]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0030.jpg tensor([[-3.6362,  5.9180, -3.5150,  3.3821]], device='cuda:0')
+tensor([[-3.6362,  5.9180, -3.5150,  3.3821]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0031.jpg tensor([[ 6.1813, -4.6845,  0.0288, -0.7771]], device='cuda:0')
+tensor([[ 6.1813, -4.6845,  0.0288, -0.7771]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0032.jpg tensor([[ 11.2129, -13.2669,   4.5481,  -1.0216]], device='cuda:0')
+tensor([[ 11.2129, -13.2669,   4.5481,  -1.0216]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0033.jpg tensor([[-7.2126, -4.3164, 13.2878,  0.2979]], device='cuda:0')
+tensor([[-7.2126, -4.3164, 13.2878,  0.2979]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0034.jpg tensor([[ -0.6130, -14.2737,   0.7106,  15.2340]], device='cuda:0')
+tensor([[ -0.6130, -14.2737,   0.7106,  15.2340]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0035.jpg tensor([[ 18.2121, -10.6646,  -1.7856,  -2.1338]], device='cuda:0')
+tensor([[ 18.2121, -10.6646,  -1.7856,  -2.1338]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0036.jpg tensor([[ 12.8582, -14.0820,   3.5259,   0.2823]], device='cuda:0')
+tensor([[ 12.8582, -14.0820,   3.5259,   0.2823]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0037.jpg tensor([[-3.5215, -1.8299, 11.9437, -4.5831]], device='cuda:0')
+tensor([[-3.5215, -1.8299, 11.9437, -4.5831]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0038.jpg tensor([[ 9.8318, -5.8314, -3.4670,  0.2768]], device='cuda:0')
+tensor([[ 9.8318, -5.8314, -3.4670,  0.2768]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0039.jpg tensor([[ 0.1768,  6.0323, -0.3388, -4.5295]], device='cuda:0')
+tensor([[ 0.1768,  6.0323, -0.3388, -4.5295]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0040.jpg tensor([[ 15.6736,   1.1212, -12.7172,  -1.8939]], device='cuda:0')
+tensor([[ 15.6736,   1.1212, -12.7172,  -1.8939]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0041.jpg tensor([[10.5603, -2.8465, -4.6479, -1.6261]], device='cuda:0')
+tensor([[10.5603, -2.8465, -4.6479, -1.6261]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0042.jpg tensor([[-6.2260,  2.2715,  4.3311,  1.0963]], device='cuda:0')
+tensor([[-6.2260,  2.2715,  4.3311,  1.0963]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0043.jpg tensor([[-0.2664,  5.7275, -7.9098,  4.0391]], device='cuda:0')
+tensor([[-0.2664,  5.7275, -7.9098,  4.0391]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0044.jpg tensor([[ 6.4618, -8.6769,  6.7079, -2.6372]], device='cuda:0')
+tensor([[ 6.4618, -8.6769,  6.7079, -2.6372]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0045.jpg tensor([[ 6.1175, -6.0874, -3.5183,  4.9736]], device='cuda:0')
+tensor([[ 6.1175, -6.0874, -3.5183,  4.9736]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0046.jpg tensor([[11.0525, -3.7667, -6.4272,  0.1168]], device='cuda:0')
+tensor([[11.0525, -3.7667, -6.4272,  0.1168]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0047.jpg tensor([[ 9.5807, -8.3079, -1.4784,  0.9685]], device='cuda:0')
+tensor([[ 9.5807, -8.3079, -1.4784,  0.9685]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0048.jpg tensor([[ 7.0743, -2.8198, -4.6427,  1.5689]], device='cuda:0')
+tensor([[ 7.0743, -2.8198, -4.6427,  1.5689]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0049.jpg tensor([[ 0.0878, -0.8119, -0.3522,  1.9682]], device='cuda:0')
+tensor([[ 0.0878, -0.8119, -0.3522,  1.9682]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0050.jpg tensor([[ 0.1964,  2.6800,  0.1285, -1.0407]], device='cuda:0')
+tensor([[ 0.1964,  2.6800,  0.1285, -1.0407]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0051.jpg tensor([[ 0.8638,  1.2803, -1.4618, -0.0408]], device='cuda:0')
+tensor([[ 0.8638,  1.2803, -1.4618, -0.0408]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0052.jpg tensor([[-1.5041,  2.0617, -0.5287,  0.4351]], device='cuda:0')
+tensor([[-1.5041,  2.0617, -0.5287,  0.4351]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0053.jpg tensor([[ 1.8116,  1.9109, -3.4197,  1.0371]], device='cuda:0')
+tensor([[ 1.8116,  1.9109, -3.4197,  1.0371]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0054.jpg tensor([[ 17.0687, -13.7772,  -4.3434,   3.0096]], device='cuda:0')
+tensor([[ 17.0687, -13.7772,  -4.3434,   3.0096]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0055.jpg tensor([[ 5.0139, -8.3577, -0.9823,  6.3383]], device='cuda:0')
+tensor([[ 5.0139, -8.3577, -0.9823,  6.3383]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0056.jpg tensor([[-0.6092,  0.4455,  5.2281, -2.9298]], device='cuda:0')
+tensor([[-0.6092,  0.4455,  5.2281, -2.9298]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0057.jpg tensor([[-8.4827, 13.2668, -6.9055,  3.5424]], device='cuda:0')
+tensor([[-8.4827, 13.2668, -6.9055,  3.5424]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0058.jpg tensor([[ 30.0230, -23.1736,  -1.4527,  -2.3795]], device='cuda:0')
+tensor([[ 30.0230, -23.1736,  -1.4527,  -2.3795]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0059.jpg tensor([[-0.6718,  0.3268, -1.9523,  2.8133]], device='cuda:0')
+tensor([[-0.6718,  0.3268, -1.9523,  2.8133]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0060.jpg tensor([[  3.4735, -12.4670,  11.2837,  -2.0442]], device='cuda:0')
+tensor([[  3.4735, -12.4670,  11.2837,  -2.0442]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0061.jpg tensor([[-4.9807,  7.3158,  0.6887, -1.5740]], device='cuda:0')
+tensor([[-4.9807,  7.3158,  0.6887, -1.5740]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0062.jpg tensor([[-0.3638, -2.9878,  6.4276, -0.7166]], device='cuda:0')
+tensor([[-0.3638, -2.9878,  6.4276, -0.7166]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0063.jpg tensor([[ 2.1754,  0.6579, -4.9360,  3.2530]], device='cuda:0')
+tensor([[ 2.1754,  0.6579, -4.9360,  3.2530]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0064.jpg tensor([[-1.8102,  1.2598, -4.1421,  5.9440]], device='cuda:0')
+tensor([[-1.8102,  1.2598, -4.1421,  5.9440]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0065.jpg tensor([[ 8.8972, -5.9130, -8.9043,  8.2068]], device='cuda:0')
+tensor([[ 8.8972, -5.9130, -8.9043,  8.2068]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+0066.jpg tensor([[ 3.1507, -5.9325, -1.6663,  6.1173]], device='cuda:0')
+tensor([[ 3.1507, -5.9325, -1.6663,  6.1173]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 0
+---------------------------
+0067.jpg tensor([[ 2.9152,  1.7931,  4.3594, -6.8301]], device='cuda:0')
+tensor([[ 2.9152,  1.7931,  4.3594, -6.8301]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0068.jpg tensor([[-2.5824, 13.8454,  0.4735, -9.1993]], device='cuda:0')
+tensor([[-2.5824, 13.8454,  0.4735, -9.1993]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+0069.jpg tensor([[-2.5296,  4.5455,  5.6442, -5.9141]], device='cuda:0')
+tensor([[-2.5296,  4.5455,  5.6442, -5.9141]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0070.jpg tensor([[-7.9891,  5.1158,  6.6991, -2.0129]], device='cuda:0')
+tensor([[-7.9891,  5.1158,  6.6991, -2.0129]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 0
+---------------------------
+0000.jpg tensor([[-0.3542, -2.5372, -2.6333,  6.6781]], device='cuda:0')
+tensor([[-0.3542, -2.5372, -2.6333,  6.6781]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0001.jpg tensor([[ 13.0905, -11.3716,  -6.0741,   4.7535]], device='cuda:0')
+tensor([[ 13.0905, -11.3716,  -6.0741,   4.7535]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0002.jpg tensor([[ 3.1596, -2.7201, -1.0160,  1.4738]], device='cuda:0')
+tensor([[ 3.1596, -2.7201, -1.0160,  1.4738]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0003.jpg tensor([[ -5.6547,  19.8572, -10.3062,  -0.8999]], device='cuda:0')
+tensor([[ -5.6547,  19.8572, -10.3062,  -0.8999]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0004.jpg tensor([[-0.3095,  0.2612, -3.0174,  4.4602]], device='cuda:0')
+tensor([[-0.3095,  0.2612, -3.0174,  4.4602]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0005.jpg tensor([[ 3.5281, -4.8824,  1.8070,  2.0157]], device='cuda:0')
+tensor([[ 3.5281, -4.8824,  1.8070,  2.0157]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0006.jpg tensor([[ 2.7434,  1.7473, -3.5181,  0.6036]], device='cuda:0')
+tensor([[ 2.7434,  1.7473, -3.5181,  0.6036]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0007.jpg tensor([[ 7.5033,  0.4283, -7.8859,  1.6710]], device='cuda:0')
+tensor([[ 7.5033,  0.4283, -7.8859,  1.6710]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0008.jpg tensor([[ 1.8473,  1.5150, -5.4576,  4.7977]], device='cuda:0')
+tensor([[ 1.8473,  1.5150, -5.4576,  4.7977]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0009.jpg tensor([[ 3.1764,  0.8075, -4.7477,  2.1517]], device='cuda:0')
+tensor([[ 3.1764,  0.8075, -4.7477,  2.1517]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0010.jpg tensor([[-6.5373,  9.1323,  7.5741, -7.6626]], device='cuda:0')
+tensor([[-6.5373,  9.1323,  7.5741, -7.6626]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0011.jpg tensor([[ 3.2827,  5.1789, -5.4782, -1.5695]], device='cuda:0')
+tensor([[ 3.2827,  5.1789, -5.4782, -1.5695]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0012.jpg tensor([[-5.5819, 10.7897, -1.9043, -1.9560]], device='cuda:0')
+tensor([[-5.5819, 10.7897, -1.9043, -1.9560]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0013.jpg tensor([[ 2.3539,  5.2373, -8.4885,  3.4361]], device='cuda:0')
+tensor([[ 2.3539,  5.2373, -8.4885,  3.4361]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0014.jpg tensor([[ 2.3139, -0.4417, -2.2421,  1.3739]], device='cuda:0')
+tensor([[ 2.3139, -0.4417, -2.2421,  1.3739]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0015.jpg tensor([[ 4.2719, -3.9677, -5.7366,  6.4562]], device='cuda:0')
+tensor([[ 4.2719, -3.9677, -5.7366,  6.4562]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0016.jpg tensor([[  8.3017, -11.4579,  -3.1329,   7.3998]], device='cuda:0')
+tensor([[  8.3017, -11.4579,  -3.1329,   7.3998]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0017.jpg tensor([[ 0.2233, -1.9099,  1.7345,  0.8613]], device='cuda:0')
+tensor([[ 0.2233, -1.9099,  1.7345,  0.8613]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0018.jpg tensor([[-3.1787,  3.3518, -5.4356,  7.4569]], device='cuda:0')
+tensor([[-3.1787,  3.3518, -5.4356,  7.4569]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0019.jpg tensor([[  2.3286,  12.3019, -10.5105,  -1.1806]], device='cuda:0')
+tensor([[  2.3286,  12.3019, -10.5105,  -1.1806]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0020.jpg tensor([[ 2.2710,  8.2633, -6.4938, -1.7816]], device='cuda:0')
+tensor([[ 2.2710,  8.2633, -6.4938, -1.7816]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0021.jpg tensor([[-5.3865,  8.9500, -1.0655, -0.6432]], device='cuda:0')
+tensor([[-5.3865,  8.9500, -1.0655, -0.6432]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0022.jpg tensor([[-0.1403, -0.6647,  4.7910, -2.1440]], device='cuda:0')
+tensor([[-0.1403, -0.6647,  4.7910, -2.1440]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0023.jpg tensor([[ 4.6514, 13.0077, -5.5649, -9.9842]], device='cuda:0')
+tensor([[ 4.6514, 13.0077, -5.5649, -9.9842]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0024.jpg tensor([[-3.5073,  5.0120, -6.5279,  6.4161]], device='cuda:0')
+tensor([[-3.5073,  5.0120, -6.5279,  6.4161]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0025.jpg tensor([[-5.0724,  0.9420,  3.8287,  1.9030]], device='cuda:0')
+tensor([[-5.0724,  0.9420,  3.8287,  1.9030]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0026.jpg tensor([[-1.4808,  6.6873, -3.5994, -0.5611]], device='cuda:0')
+tensor([[-1.4808,  6.6873, -3.5994, -0.5611]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0027.jpg tensor([[  1.8784,  13.8472,   0.3759, -13.9669]], device='cuda:0')
+tensor([[  1.8784,  13.8472,   0.3759, -13.9669]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0028.jpg tensor([[ 5.1101, -2.6667, -5.0434,  3.4190]], device='cuda:0')
+tensor([[ 5.1101, -2.6667, -5.0434,  3.4190]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0029.jpg tensor([[-5.8244,  6.7245,  2.7896, -2.3223]], device='cuda:0')
+tensor([[-5.8244,  6.7245,  2.7896, -2.3223]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0030.jpg tensor([[-8.7436,  1.3419,  3.2193,  5.1921]], device='cuda:0')
+tensor([[-8.7436,  1.3419,  3.2193,  5.1921]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0031.jpg tensor([[ 10.7644, -14.3725,   6.0683,  -0.7622]], device='cuda:0')
+tensor([[ 10.7644, -14.3725,   6.0683,  -0.7622]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0032.jpg tensor([[-13.5298,  10.4969,  -4.6909,   9.7133]], device='cuda:0')
+tensor([[-13.5298,  10.4969,  -4.6909,   9.7133]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0033.jpg tensor([[ 3.8732, -1.3989, -5.3208,  4.3467]], device='cuda:0')
+tensor([[ 3.8732, -1.3989, -5.3208,  4.3467]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0034.jpg tensor([[  8.9978, -26.5714,  15.4781,   3.1135]], device='cuda:0')
+tensor([[  8.9978, -26.5714,  15.4781,   3.1135]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0035.jpg tensor([[ 6.4566,  1.4700, -3.9451, -1.8796]], device='cuda:0')
+tensor([[ 6.4566,  1.4700, -3.9451, -1.8796]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0036.jpg tensor([[ 2.0576, -9.0326,  1.5821,  6.4594]], device='cuda:0')
+tensor([[ 2.0576, -9.0326,  1.5821,  6.4594]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0037.jpg tensor([[10.9305, -4.1718, -5.9405,  1.6849]], device='cuda:0')
+tensor([[10.9305, -4.1718, -5.9405,  1.6849]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0038.jpg tensor([[-1.6082,  1.3776,  8.1236, -6.9279]], device='cuda:0')
+tensor([[-1.6082,  1.3776,  8.1236, -6.9279]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0039.jpg tensor([[-12.0110,  -0.8015,   4.8651,  10.6921]], device='cuda:0')
+tensor([[-12.0110,  -0.8015,   4.8651,  10.6921]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0040.jpg tensor([[-11.4368,   6.9801,   7.4432,  -0.0781]], device='cuda:0')
+tensor([[-11.4368,   6.9801,   7.4432,  -0.0781]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0041.jpg tensor([[-4.6189,  8.8036, -0.2785, -1.0901]], device='cuda:0')
+tensor([[-4.6189,  8.8036, -0.2785, -1.0901]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0042.jpg tensor([[13.2361, -5.0205, -8.6578,  3.1742]], device='cuda:0')
+tensor([[13.2361, -5.0205, -8.6578,  3.1742]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0043.jpg tensor([[-1.8478, 14.8469, -8.9524, -0.9292]], device='cuda:0')
+tensor([[-1.8478, 14.8469, -8.9524, -0.9292]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0044.jpg tensor([[ 3.0293, -4.2401,  1.0390,  2.2982]], device='cuda:0')
+tensor([[ 3.0293, -4.2401,  1.0390,  2.2982]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0045.jpg tensor([[ 6.2096, -0.0904, -6.7508,  1.9063]], device='cuda:0')
+tensor([[ 6.2096, -0.0904, -6.7508,  1.9063]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0046.jpg tensor([[ 1.0900, -1.7663, -3.8022,  5.5848]], device='cuda:0')
+tensor([[ 1.0900, -1.7663, -3.8022,  5.5848]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0047.jpg tensor([[ 13.5175, -11.1731,  -1.5444,   1.7427]], device='cuda:0')
+tensor([[ 13.5175, -11.1731,  -1.5444,   1.7427]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0048.jpg tensor([[-0.5859, -2.3303, -2.2852,  6.8756]], device='cuda:0')
+tensor([[-0.5859, -2.3303, -2.2852,  6.8756]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0049.jpg tensor([[ 0.9406, -6.3666,  0.2038,  5.9313]], device='cuda:0')
+tensor([[ 0.9406, -6.3666,  0.2038,  5.9313]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0050.jpg tensor([[ 3.3692,  7.7131, -3.5223, -4.9381]], device='cuda:0')
+tensor([[ 3.3692,  7.7131, -3.5223, -4.9381]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0051.jpg tensor([[-2.2188, -4.1631, -0.1444,  7.2952]], device='cuda:0')
+tensor([[-2.2188, -4.1631, -0.1444,  7.2952]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0052.jpg tensor([[ 5.5329,  4.3258, -4.2339, -4.3285]], device='cuda:0')
+tensor([[ 5.5329,  4.3258, -4.2339, -4.3285]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0053.jpg tensor([[-9.0533,  8.8802,  1.3261,  0.4857]], device='cuda:0')
+tensor([[-9.0533,  8.8802,  1.3261,  0.4857]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0054.jpg tensor([[10.8345, -6.2483, -1.6953, -0.9063]], device='cuda:0')
+tensor([[10.8345, -6.2483, -1.6953, -0.9063]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0055.jpg tensor([[ 1.2954, 10.1566, -5.1037, -3.6665]], device='cuda:0')
+tensor([[ 1.2954, 10.1566, -5.1037, -3.6665]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0056.jpg tensor([[ 7.5631, -5.3967, -2.1117,  1.5024]], device='cuda:0')
+tensor([[ 7.5631, -5.3967, -2.1117,  1.5024]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0057.jpg tensor([[ 1.2935,  6.4361, -5.0015, -0.9901]], device='cuda:0')
+tensor([[ 1.2935,  6.4361, -5.0015, -0.9901]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0058.jpg tensor([[ 3.3078,  6.0821, -6.2236, -1.0662]], device='cuda:0')
+tensor([[ 3.3078,  6.0821, -6.2236, -1.0662]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+0059.jpg tensor([[ 4.8305, -9.3402,  3.7388,  3.2896]], device='cuda:0')
+tensor([[ 4.8305, -9.3402,  3.7388,  3.2896]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0060.jpg tensor([[ 5.2304, -6.4185,  0.9804,  0.5197]], device='cuda:0')
+tensor([[ 5.2304, -6.4185,  0.9804,  0.5197]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0061.jpg tensor([[ 3.0006, -9.3341,  4.0472,  3.1064]], device='cuda:0')
+tensor([[ 3.0006, -9.3341,  4.0472,  3.1064]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0062.jpg tensor([[  7.8685, -11.4837,   3.7607,   1.1033]], device='cuda:0')
+tensor([[  7.8685, -11.4837,   3.7607,   1.1033]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0063.jpg tensor([[ 3.8092, -2.3441, -3.1305,  3.5092]], device='cuda:0')
+tensor([[ 3.8092, -2.3441, -3.1305,  3.5092]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0064.jpg tensor([[ 6.3135, -1.4371, -0.9974, -2.6026]], device='cuda:0')
+tensor([[ 6.3135, -1.4371, -0.9974, -2.6026]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0065.jpg tensor([[-3.1823, -0.1456,  6.8956, -2.2478]], device='cuda:0')
+tensor([[-3.1823, -0.1456,  6.8956, -2.2478]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 1
+---------------------------
+0066.jpg tensor([[10.6471, -3.0834,  0.6671, -6.4068]], device='cuda:0')
+tensor([[10.6471, -3.0834,  0.6671, -6.4068]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0067.jpg tensor([[-0.1204, -0.4328, -3.1785,  5.2642]], device='cuda:0')
+tensor([[-0.1204, -0.4328, -3.1785,  5.2642]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0068.jpg tensor([[-1.0319, -2.7465, -2.4052,  7.2341]], device='cuda:0')
+tensor([[-1.0319, -2.7465, -2.4052,  7.2341]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 1
+---------------------------
+0069.jpg tensor([[ 4.0513,  2.6588, -3.7347, -2.0189]], device='cuda:0')
+tensor([[ 4.0513,  2.6588, -3.7347, -2.0189]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0072.jpg tensor([[ 8.4257, -6.7763, -1.9553,  1.3887]], device='cuda:0')
+tensor([[ 8.4257, -6.7763, -1.9553,  1.3887]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+0000.jpg tensor([[-5.9511,  6.5072,  1.1790, -0.1382]], device='cuda:0')
+tensor([[-5.9511,  6.5072,  1.1790, -0.1382]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0001.jpg tensor([[ 9.3276, -5.0703,  0.1108, -2.3895]], device='cuda:0')
+tensor([[ 9.3276, -5.0703,  0.1108, -2.3895]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0002.jpg tensor([[  6.2486, -11.4671,   3.4391,   2.6913]], device='cuda:0')
+tensor([[  6.2486, -11.4671,   3.4391,   2.6913]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0003.jpg tensor([[-1.1550,  1.0780, -3.9555,  5.4907]], device='cuda:0')
+tensor([[-1.1550,  1.0780, -3.9555,  5.4907]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0004.jpg tensor([[ 5.2182,  3.8757, -7.0727,  0.3797]], device='cuda:0')
+tensor([[ 5.2182,  3.8757, -7.0727,  0.3797]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0005.jpg tensor([[ 8.3779, -9.9714,  2.2218,  1.4796]], device='cuda:0')
+tensor([[ 8.3779, -9.9714,  2.2218,  1.4796]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0006.jpg tensor([[-2.5505, -2.3200,  3.1009,  2.7386]], device='cuda:0')
+tensor([[-2.5505, -2.3200,  3.1009,  2.7386]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0007.jpg tensor([[-5.7749,  3.2264,  6.1564, -1.5605]], device='cuda:0')
+tensor([[-5.7749,  3.2264,  6.1564, -1.5605]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0008.jpg tensor([[ 1.6258, -0.8214,  5.9938, -4.3647]], device='cuda:0')
+tensor([[ 1.6258, -0.8214,  5.9938, -4.3647]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0009.jpg tensor([[-0.8983, -1.9078, -3.3734,  7.9751]], device='cuda:0')
+tensor([[-0.8983, -1.9078, -3.3734,  7.9751]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0010.jpg tensor([[ 12.9423, -10.0066,  -8.8850,   7.1463]], device='cuda:0')
+tensor([[ 12.9423, -10.0066,  -8.8850,   7.1463]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0011.jpg tensor([[-8.5552,  7.8312,  4.3209, -1.7658]], device='cuda:0')
+tensor([[-8.5552,  7.8312,  4.3209, -1.7658]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0012.jpg tensor([[-4.3563, -3.8141,  5.1317,  3.6590]], device='cuda:0')
+tensor([[-4.3563, -3.8141,  5.1317,  3.6590]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0013.jpg tensor([[-4.5202, 11.3582,  0.8169, -5.8137]], device='cuda:0')
+tensor([[-4.5202, 11.3582,  0.8169, -5.8137]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0014.jpg tensor([[-8.7393,  2.2499,  5.2775,  2.5189]], device='cuda:0')
+tensor([[-8.7393,  2.2499,  5.2775,  2.5189]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0015.jpg tensor([[-2.3288,  3.7159, -1.9463,  1.8006]], device='cuda:0')
+tensor([[-2.3288,  3.7159, -1.9463,  1.8006]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0016.jpg tensor([[-0.8547, -8.8596, 15.6288, -3.0776]], device='cuda:0')
+tensor([[-0.8547, -8.8596, 15.6288, -3.0776]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0017.jpg tensor([[-5.2830,  0.9976, -0.5911,  5.7815]], device='cuda:0')
+tensor([[-5.2830,  0.9976, -0.5911,  5.7815]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0018.jpg tensor([[-4.1482,  0.9864,  6.3361, -2.1593]], device='cuda:0')
+tensor([[-4.1482,  0.9864,  6.3361, -2.1593]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0019.jpg tensor([[ 1.0206, -1.7592,  3.3394, -0.9227]], device='cuda:0')
+tensor([[ 1.0206, -1.7592,  3.3394, -0.9227]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0020.jpg tensor([[  5.5079, -10.1454,  -2.7360,   8.3938]], device='cuda:0')
+tensor([[  5.5079, -10.1454,  -2.7360,   8.3938]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0021.jpg tensor([[ 6.6484,  0.1480, -4.5952,  0.5607]], device='cuda:0')
+tensor([[ 6.6484,  0.1480, -4.5952,  0.5607]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0022.jpg tensor([[ 1.0854, -2.0987, -4.9585,  9.8184]], device='cuda:0')
+tensor([[ 1.0854, -2.0987, -4.9585,  9.8184]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0023.jpg tensor([[ 1.4397, -0.6835,  8.1675, -8.0470]], device='cuda:0')
+tensor([[ 1.4397, -0.6835,  8.1675, -8.0470]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0024.jpg tensor([[ -1.8391,   5.1885,  10.7095, -11.4588]], device='cuda:0')
+tensor([[ -1.8391,   5.1885,  10.7095, -11.4588]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0025.jpg tensor([[ 5.3933, -7.8869,  6.6288, -3.2403]], device='cuda:0')
+tensor([[ 5.3933, -7.8869,  6.6288, -3.2403]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0026.jpg tensor([[18.8988, -9.1878, -3.6657, -3.6103]], device='cuda:0')
+tensor([[18.8988, -9.1878, -3.6657, -3.6103]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0027.jpg tensor([[ 1.3184, -0.2918, -4.0673,  4.0059]], device='cuda:0')
+tensor([[ 1.3184, -0.2918, -4.0673,  4.0059]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0028.jpg tensor([[-10.4431,   8.7716,   4.2682,  -0.8784]], device='cuda:0')
+tensor([[-10.4431,   8.7716,   4.2682,  -0.8784]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0029.jpg tensor([[-10.5322,   2.0267,   2.9063,   6.7480]], device='cuda:0')
+tensor([[-10.5322,   2.0267,   2.9063,   6.7480]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0030.jpg tensor([[-4.2091,  4.1744,  6.8679, -4.4578]], device='cuda:0')
+tensor([[-4.2091,  4.1744,  6.8679, -4.4578]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0031.jpg tensor([[-8.2896,  2.5536,  8.0075, -0.8670]], device='cuda:0')
+tensor([[-8.2896,  2.5536,  8.0075, -0.8670]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0032.jpg tensor([[-3.4167, 14.6725, -3.3553, -5.6874]], device='cuda:0')
+tensor([[-3.4167, 14.6725, -3.3553, -5.6874]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0033.jpg tensor([[ 0.4997, -0.1449, -5.7246,  6.9642]], device='cuda:0')
+tensor([[ 0.4997, -0.1449, -5.7246,  6.9642]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0034.jpg tensor([[-6.0857, -5.7727, 11.2594,  1.5039]], device='cuda:0')
+tensor([[-6.0857, -5.7727, 11.2594,  1.5039]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0035.jpg tensor([[ 0.3284, -0.0707, -7.9774,  8.5111]], device='cuda:0')
+tensor([[ 0.3284, -0.0707, -7.9774,  8.5111]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0036.jpg tensor([[-0.5798, -0.0557,  4.1703, -1.8002]], device='cuda:0')
+tensor([[-0.5798, -0.0557,  4.1703, -1.8002]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0037.jpg tensor([[ -9.5320, -27.1177,  41.2943,   0.6133]], device='cuda:0')
+tensor([[ -9.5320, -27.1177,  41.2943,   0.6133]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0038.jpg tensor([[ 4.5577, -0.3077,  1.4109, -2.9375]], device='cuda:0')
+tensor([[ 4.5577, -0.3077,  1.4109, -2.9375]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0039.jpg tensor([[-8.9322, -0.4772, 15.2669, -3.3892]], device='cuda:0')
+tensor([[-8.9322, -0.4772, 15.2669, -3.3892]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0040.jpg tensor([[-11.0005,   3.1605,   4.9491,   3.8116]], device='cuda:0')
+tensor([[-11.0005,   3.1605,   4.9491,   3.8116]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0041.jpg tensor([[-6.1616,  5.5009,  6.0435, -3.9838]], device='cuda:0')
+tensor([[-6.1616,  5.5009,  6.0435, -3.9838]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0042.jpg tensor([[-1.8577,  0.9352, -0.5793,  2.0388]], device='cuda:0')
+tensor([[-1.8577,  0.9352, -0.5793,  2.0388]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0043.jpg tensor([[-5.3167, 12.7004, -2.4772, -2.7750]], device='cuda:0')
+tensor([[-5.3167, 12.7004, -2.4772, -2.7750]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0044.jpg tensor([[-8.4282,  0.2573,  2.9712,  7.3273]], device='cuda:0')
+tensor([[-8.4282,  0.2573,  2.9712,  7.3273]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0045.jpg tensor([[ 3.8833, -7.5935, -0.6427,  6.6195]], device='cuda:0')
+tensor([[ 3.8833, -7.5935, -0.6427,  6.6195]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0046.jpg tensor([[-1.3044, -3.8490, -3.5080, 10.7134]], device='cuda:0')
+tensor([[-1.3044, -3.8490, -3.5080, 10.7134]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0047.jpg tensor([[ 2.4902, -2.1564,  1.6593, -0.8860]], device='cuda:0')
+tensor([[ 2.4902, -2.1564,  1.6593, -0.8860]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0048.jpg tensor([[ 0.6588,  3.7471, -0.0582, -2.7267]], device='cuda:0')
+tensor([[ 0.6588,  3.7471, -0.0582, -2.7267]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0049.jpg tensor([[-10.9056,   1.7636,   3.9189,   6.6281]], device='cuda:0')
+tensor([[-10.9056,   1.7636,   3.9189,   6.6281]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0050.jpg tensor([[-11.3206,   3.0611,  12.8135,  -2.7242]], device='cuda:0')
+tensor([[-11.3206,   3.0611,  12.8135,  -2.7242]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0051.jpg tensor([[-6.8757, -1.0161,  2.8958,  6.7369]], device='cuda:0')
+tensor([[-6.8757, -1.0161,  2.8958,  6.7369]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0052.jpg tensor([[-12.6163,  14.1046,   5.3515,  -4.6673]], device='cuda:0')
+tensor([[-12.6163,  14.1046,   5.3515,  -4.6673]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0053.jpg tensor([[-1.8241, -0.2205, -3.1479,  5.7311]], device='cuda:0')
+tensor([[-1.8241, -0.2205, -3.1479,  5.7311]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0054.jpg tensor([[ 3.0919, -3.7196, -3.4549,  4.5266]], device='cuda:0')
+tensor([[ 3.0919, -3.7196, -3.4549,  4.5266]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0055.jpg tensor([[-0.0395,  6.3626, -6.6559,  1.6910]], device='cuda:0')
+tensor([[-0.0395,  6.3626, -6.6559,  1.6910]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0056.jpg tensor([[-9.7018,  1.9831,  7.5100,  2.5333]], device='cuda:0')
+tensor([[-9.7018,  1.9831,  7.5100,  2.5333]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0057.jpg tensor([[-3.9014,  0.5345,  3.3270,  1.4694]], device='cuda:0')
+tensor([[-3.9014,  0.5345,  3.3270,  1.4694]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0058.jpg tensor([[ -0.1540, -10.2783,  11.6894,  -0.0927]], device='cuda:0')
+tensor([[ -0.1540, -10.2783,  11.6894,  -0.0927]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0059.jpg tensor([[-1.0020,  1.0441,  3.7979, -2.4017]], device='cuda:0')
+tensor([[-1.0020,  1.0441,  3.7979, -2.4017]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0060.jpg tensor([[-2.5337, -9.1751, 15.4375, -2.4762]], device='cuda:0')
+tensor([[-2.5337, -9.1751, 15.4375, -2.4762]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0061.jpg tensor([[-7.4999,  3.6211,  7.5057, -1.7476]], device='cuda:0')
+tensor([[-7.4999,  3.6211,  7.5057, -1.7476]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0062.jpg tensor([[  0.4090, -10.5956,  10.9756,   0.8048]], device='cuda:0')
+tensor([[  0.4090, -10.5956,  10.9756,   0.8048]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 2
+---------------------------
+0063.jpg tensor([[ 1.8251, -1.2123,  0.7523, -0.7778]], device='cuda:0')
+tensor([[ 1.8251, -1.2123,  0.7523, -0.7778]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0064.jpg tensor([[-3.2153,  1.5908,  0.1295,  2.8232]], device='cuda:0')
+tensor([[-3.2153,  1.5908,  0.1295,  2.8232]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0065.jpg tensor([[-6.1838,  3.5550, -3.5684,  7.8747]], device='cuda:0')
+tensor([[-6.1838,  3.5550, -3.5684,  7.8747]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 2
+---------------------------
+0066.jpg tensor([[ 0.8907,  2.7147,  0.5413, -2.5214]], device='cuda:0')
+tensor([[ 0.8907,  2.7147,  0.5413, -2.5214]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0067.jpg tensor([[ 2.2756,  6.4493, -1.5604, -5.7859]], device='cuda:0')
+tensor([[ 2.2756,  6.4493, -1.5604, -5.7859]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0068.jpg tensor([[ 0.5564,  3.2420, -1.8823, -1.0295]], device='cuda:0')
+tensor([[ 0.5564,  3.2420, -1.8823, -1.0295]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0069.jpg tensor([[ 0.9783,  6.0134, -3.4686, -1.8131]], device='cuda:0')
+tensor([[ 0.9783,  6.0134, -3.4686, -1.8131]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 2
+---------------------------
+0070.jpg tensor([[ 10.4546, -12.3650,  -1.7104,   7.3584]], device='cuda:0')
+tensor([[ 10.4546, -12.3650,  -1.7104,   7.3584]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0071.jpg tensor([[ 4.9793,  0.7885, -8.2664,  3.8302]], device='cuda:0')
+tensor([[ 4.9793,  0.7885, -8.2664,  3.8302]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 2
+---------------------------
+0000.jpg tensor([[-3.0303, -1.6011, -0.6180,  5.9289]], device='cuda:0')
+tensor([[-3.0303, -1.6011, -0.6180,  5.9289]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0001.jpg tensor([[-6.3190, -2.3537,  7.0681,  3.6760]], device='cuda:0')
+tensor([[-6.3190, -2.3537,  7.0681,  3.6760]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0002.jpg tensor([[ 3.0106,  0.7186, -2.0021, -0.7673]], device='cuda:0')
+tensor([[ 3.0106,  0.7186, -2.0021, -0.7673]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0003.jpg tensor([[ 3.8738, -2.8586, -2.2428,  2.1462]], device='cuda:0')
+tensor([[ 3.8738, -2.8586, -2.2428,  2.1462]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0004.jpg tensor([[-9.6677, -0.9858,  3.8223,  7.5816]], device='cuda:0')
+tensor([[-9.6677, -0.9858,  3.8223,  7.5816]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0005.jpg tensor([[-7.8126e+00, -3.0512e-01,  9.5205e+00,  2.5864e-03]], device='cuda:0')
+tensor([[-7.8126e+00, -3.0512e-01,  9.5205e+00,  2.5864e-03]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0006.jpg tensor([[-0.5819,  8.4671,  2.3359, -8.7834]], device='cuda:0')
+tensor([[-0.5819,  8.4671,  2.3359, -8.7834]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0007.jpg tensor([[-22.2241,  11.8911,   2.8499,  12.1105]], device='cuda:0')
+tensor([[-22.2241,  11.8911,   2.8499,  12.1105]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0008.jpg tensor([[-1.1718, 12.5156, -7.5864, -2.0127]], device='cuda:0')
+tensor([[-1.1718, 12.5156, -7.5864, -2.0127]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0009.jpg tensor([[-7.9182,  3.5063,  1.9191,  3.8459]], device='cuda:0')
+tensor([[-7.9182,  3.5063,  1.9191,  3.8459]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0010.jpg tensor([[ -4.9261,  13.9568,   3.9380, -10.4383]], device='cuda:0')
+tensor([[ -4.9261,  13.9568,   3.9380, -10.4383]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0011.jpg tensor([[-2.7786, -2.4934,  8.1932, -0.9791]], device='cuda:0')
+tensor([[-2.7786, -2.4934,  8.1932, -0.9791]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0012.jpg tensor([[-7.0086, 12.4326,  4.4125, -6.3460]], device='cuda:0')
+tensor([[-7.0086, 12.4326,  4.4125, -6.3460]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0013.jpg tensor([[-0.9876, -8.6865,  9.0975,  1.9671]], device='cuda:0')
+tensor([[-0.9876, -8.6865,  9.0975,  1.9671]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0014.jpg tensor([[ 0.8615, -1.5168, -4.0711,  6.5204]], device='cuda:0')
+tensor([[ 0.8615, -1.5168, -4.0711,  6.5204]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0015.jpg tensor([[ 16.0884, -10.9759,  -7.4082,   5.2028]], device='cuda:0')
+tensor([[ 16.0884, -10.9759,  -7.4082,   5.2028]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0016.jpg tensor([[  8.1090,  -7.7574, -11.1955,  13.9096]], device='cuda:0')
+tensor([[  8.1090,  -7.7574, -11.1955,  13.9096]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0017.jpg tensor([[-12.4717,  14.7154,   8.8537,  -8.2172]], device='cuda:0')
+tensor([[-12.4717,  14.7154,   8.8537,  -8.2172]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0018.jpg tensor([[-16.1844,  10.5870,  20.0498,  -9.7074]], device='cuda:0')
+tensor([[-16.1844,  10.5870,  20.0498,  -9.7074]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0019.jpg tensor([[ 7.4883, -1.0998, -7.9086,  3.0114]], device='cuda:0')
+tensor([[ 7.4883, -1.0998, -7.9086,  3.0114]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0020.jpg tensor([[ 10.9447, -18.0730,   0.2606,   7.1791]], device='cuda:0')
+tensor([[ 10.9447, -18.0730,   0.2606,   7.1791]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0021.jpg tensor([[-16.3564,   2.8063,  19.2040,  -1.8178]], device='cuda:0')
+tensor([[-16.3564,   2.8063,  19.2040,  -1.8178]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0022.jpg tensor([[-2.5368,  4.9103,  6.9584, -7.3373]], device='cuda:0')
+tensor([[-2.5368,  4.9103,  6.9584, -7.3373]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0023.jpg tensor([[ 7.0779, -4.1627, -6.0111,  3.5394]], device='cuda:0')
+tensor([[ 7.0779, -4.1627, -6.0111,  3.5394]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0024.jpg tensor([[ 11.7118, -13.7278,  -1.0111,   3.8613]], device='cuda:0')
+tensor([[ 11.7118, -13.7278,  -1.0111,   3.8613]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0025.jpg tensor([[-3.9200, -2.3760,  8.0935,  0.4602]], device='cuda:0')
+tensor([[-3.9200, -2.3760,  8.0935,  0.4602]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0026.jpg tensor([[-0.3152,  9.6532, -6.9948, -0.2343]], device='cuda:0')
+tensor([[-0.3152,  9.6532, -6.9948, -0.2343]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0027.jpg tensor([[-12.0884,   5.3566,   4.2214,   4.2001]], device='cuda:0')
+tensor([[-12.0884,   5.3566,   4.2214,   4.2001]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0028.jpg tensor([[-12.6690,   3.5736,   7.5020,   2.8926]], device='cuda:0')
+tensor([[-12.6690,   3.5736,   7.5020,   2.8926]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0029.jpg tensor([[-4.4911,  7.0648, -1.2525,  0.6460]], device='cuda:0')
+tensor([[-4.4911,  7.0648, -1.2525,  0.6460]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0030.jpg tensor([[-7.0832,  8.5555,  2.0835, -1.6613]], device='cuda:0')
+tensor([[-7.0832,  8.5555,  2.0835, -1.6613]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0031.jpg tensor([[ 6.0639, -9.3710,  8.1208, -3.3271]], device='cuda:0')
+tensor([[ 6.0639, -9.3710,  8.1208, -3.3271]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0032.jpg tensor([[-16.6876, -11.5379,  22.6939,   7.8298]], device='cuda:0')
+tensor([[-16.6876, -11.5379,  22.6939,   7.8298]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0033.jpg tensor([[-13.7632,   7.5395,   1.8676,   6.2146]], device='cuda:0')
+tensor([[-13.7632,   7.5395,   1.8676,   6.2146]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0034.jpg tensor([[-2.6839, -1.2316, -3.7889,  8.7468]], device='cuda:0')
+tensor([[-2.6839, -1.2316, -3.7889,  8.7468]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0035.jpg tensor([[-8.9444, -6.3469,  7.0492,  9.5753]], device='cuda:0')
+tensor([[-8.9444, -6.3469,  7.0492,  9.5753]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0036.jpg tensor([[-0.9672, 10.4841, -3.0575, -4.7644]], device='cuda:0')
+tensor([[-0.9672, 10.4841, -3.0575, -4.7644]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0037.jpg tensor([[-15.2603,   4.0500,  20.6974,  -5.8554]], device='cuda:0')
+tensor([[-15.2603,   4.0500,  20.6974,  -5.8554]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0038.jpg tensor([[-2.3572,  7.5433, -3.3202, -0.0598]], device='cuda:0')
+tensor([[-2.3572,  7.5433, -3.3202, -0.0598]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0039.jpg tensor([[-5.0593, -0.8426,  5.5001,  1.7056]], device='cuda:0')
+tensor([[-5.0593, -0.8426,  5.5001,  1.7056]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0040.jpg tensor([[ 6.0325,  0.0845, -4.6086,  0.5107]], device='cuda:0')
+tensor([[ 6.0325,  0.0845, -4.6086,  0.5107]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0041.jpg tensor([[ 1.0885,  6.7942, -2.2707, -4.6242]], device='cuda:0')
+tensor([[ 1.0885,  6.7942, -2.2707, -4.6242]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0042.jpg tensor([[ 0.7904,  2.9948,  5.8940, -7.6361]], device='cuda:0')
+tensor([[ 0.7904,  2.9948,  5.8940, -7.6361]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0043.jpg tensor([[-2.4586, -0.9380,  2.1078,  2.6474]], device='cuda:0')
+tensor([[-2.4586, -0.9380,  2.1078,  2.6474]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0044.jpg tensor([[-4.1914, -3.9218,  2.1739,  7.0447]], device='cuda:0')
+tensor([[-4.1914, -3.9218,  2.1739,  7.0447]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0045.jpg tensor([[-1.3894,  2.6006, -6.7452,  6.6565]], device='cuda:0')
+tensor([[-1.3894,  2.6006, -6.7452,  6.6565]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0046.jpg tensor([[-6.1226, -1.4755, -0.2839,  9.4215]], device='cuda:0')
+tensor([[-6.1226, -1.4755, -0.2839,  9.4215]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0047.jpg tensor([[ 9.1878, -3.5285, -2.8629, -1.9373]], device='cuda:0')
+tensor([[ 9.1878, -3.5285, -2.8629, -1.9373]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0048.jpg tensor([[ 0.7292, -3.2325, -3.9585,  8.3948]], device='cuda:0')
+tensor([[ 0.7292, -3.2325, -3.9585,  8.3948]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0049.jpg tensor([[-2.3575,  1.2917,  3.4997, -0.9799]], device='cuda:0')
+tensor([[-2.3575,  1.2917,  3.4997, -0.9799]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0050.jpg tensor([[-5.5066,  3.0131, -1.9158,  6.3328]], device='cuda:0')
+tensor([[-5.5066,  3.0131, -1.9158,  6.3328]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0051.jpg tensor([[-6.2680, -5.0515,  9.8703,  3.0525]], device='cuda:0')
+tensor([[-6.2680, -5.0515,  9.8703,  3.0525]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0052.jpg tensor([[-22.3807,   4.1981,   1.0981,  18.6453]], device='cuda:0')
+tensor([[-22.3807,   4.1981,   1.0981,  18.6453]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0053.jpg tensor([[-10.3178,   1.7209,   5.4016,   4.8257]], device='cuda:0')
+tensor([[-10.3178,   1.7209,   5.4016,   4.8257]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0054.jpg tensor([[-10.9407,   0.0798,   6.0677,   5.5878]], device='cuda:0')
+tensor([[-10.9407,   0.0798,   6.0677,   5.5878]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0055.jpg tensor([[ 2.7370, -4.4079, -5.1459,  7.8211]], device='cuda:0')
+tensor([[ 2.7370, -4.4079, -5.1459,  7.8211]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0056.jpg tensor([[ 1.6162, -3.8811, -5.3761,  9.1345]], device='cuda:0')
+tensor([[ 1.6162, -3.8811, -5.3761,  9.1345]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0057.jpg tensor([[-1.7337, -1.7336,  1.7276,  2.6510]], device='cuda:0')
+tensor([[-1.7337, -1.7336,  1.7276,  2.6510]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0058.jpg tensor([[ 8.6333, -0.8054, -5.9030, -0.9588]], device='cuda:0')
+tensor([[ 8.6333, -0.8054, -5.9030, -0.9588]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0059.jpg tensor([[-2.7185,  7.3098,  5.4033, -7.3151]], device='cuda:0')
+tensor([[-2.7185,  7.3098,  5.4033, -7.3151]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0060.jpg tensor([[-2.4557,  3.8804,  0.0334, -0.4528]], device='cuda:0')
+tensor([[-2.4557,  3.8804,  0.0334, -0.4528]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0061.jpg tensor([[-7.7448, 14.4789, -2.2802, -1.9488]], device='cuda:0')
+tensor([[-7.7448, 14.4789, -2.2802, -1.9488]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0062.jpg tensor([[ 0.1151,  2.7468, -3.1986,  1.2611]], device='cuda:0')
+tensor([[ 0.1151,  2.7468, -3.1986,  1.2611]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0063.jpg tensor([[ 0.2777, 15.7286, -9.8839, -3.9948]], device='cuda:0')
+tensor([[ 0.2777, 15.7286, -9.8839, -3.9948]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0064.jpg tensor([[-0.9000,  0.0718,  1.5467,  1.3875]], device='cuda:0')
+tensor([[-0.9000,  0.0718,  1.5467,  1.3875]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0065.jpg tensor([[ -6.7629,  18.1962, -17.0550,   7.7361]], device='cuda:0')
+tensor([[ -6.7629,  18.1962, -17.0550,   7.7361]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0066.jpg tensor([[-5.8832, 12.5315, -1.8409, -2.8907]], device='cuda:0')
+tensor([[-5.8832, 12.5315, -1.8409, -2.8907]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0067.jpg tensor([[ 1.9481, -5.4693, -3.5066,  8.9904]], device='cuda:0')
+tensor([[ 1.9481, -5.4693, -3.5066,  8.9904]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3
+---------------------------
+0068.jpg tensor([[-5.1068,  7.3565, -2.4014,  1.8044]], device='cuda:0')
+tensor([[-5.1068,  7.3565, -2.4014,  1.8044]], device='cuda:0')
+predicted: tensor([1], device='cuda:0'), label: 3
+---------------------------
+0069.jpg tensor([[ 3.8097, -3.1285,  6.3244, -5.0405]], device='cuda:0')
+tensor([[ 3.8097, -3.1285,  6.3244, -5.0405]], device='cuda:0')
+predicted: tensor([2], device='cuda:0'), label: 3
+---------------------------
+0070.jpg tensor([[ 4.6993,  0.3767,  0.2575, -3.5050]], device='cuda:0')
+tensor([[ 4.6993,  0.3767,  0.2575, -3.5050]], device='cuda:0')
+predicted: tensor([0], device='cuda:0'), label: 3
+---------------------------
+0071.jpg tensor([[-4.9720, -3.3497,  4.2965,  7.3011]], device='cuda:0')
+tensor([[-4.9720, -3.3497,  4.2965,  7.3011]], device='cuda:0')
+predicted: tensor([3], device='cuda:0'), label: 3

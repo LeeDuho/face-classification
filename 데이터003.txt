@@ -1,0 +1,927 @@
+//강아지랑 말만
+//data003
+from torch.autograd.variable import Variable
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+import torchvision
+import matplotlib.pyplot as plt
+
+import os
+import torch.backends.cudnn as cudnn
+
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import transforms
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+
+
+class VGG(nn.Module):
+    def __init__(self):
+        super(VGG, self).__init__()
+        self.cnn = nn.Sequential(
+            # 3 x 128 x 128
+            nn.Conv2d(3, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 64 x 64 x 64
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 128 x 32 x 32
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 256 x 16 x 16
+            nn.Conv2d(256, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            # 512 x 8 x 8
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+            # 512 x 4 x 4
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(512 * 4 * 4, 4096),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+
+            nn.Linear(4096, 2048),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+
+            nn.Linear(2048, 2)
+        )
+    def forward(self, x):
+        output = self.cnn(x)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+        return output
+
+
+
+tf = transforms.Compose([
+    transforms.Resize((128,128)),
+    transforms.ToTensor(),  
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.2, 0.2, 0.2]),
+])
+
+  #'cat': 0, 'dog': 1, 'horse': 2, 'monkey': 3
+
+#남여구별
+train_data = torchvision.datasets.ImageFolder('/content/drive/MyDrive/dataset/processed_data_003', transform=tf)
+test_data = torchvision.datasets.ImageFolder('/content/drive/MyDrive/dataset/processed_test_data_003', transform=tf)
+
+
+loader = DataLoader(train_data, batch_size=8, shuffle=True)
+tdloader = DataLoader(test_data, batch_size=8, shuffle=True)
+
+# VGG모델 불러오기, 사용
+model = VGG()
+
+print(model)
+
+optimizer = optim.Adam(model.parameters(), lr=0.00005)
+loss_func = nn.CrossEntropyLoss(reduction='mean')
+
+if torch.cuda.device_count() > 0:
+    print("USE", torch.cuda.device_count(), "GPUs!")
+    model = nn.DataParallel(model).cuda()
+    cudnn.benchmark = True
+else:
+    print("USE ONLY CPU!")
+
+losses = []
+acc = 0
+
+for epoch in range(100): 
+    print("----------------\n epoch: ", epoch)
+
+    model.train()
+    acc = 0
+    pbar = tqdm(loader)
+    for imgs, labels in pbar:
+        imgs = imgs.cuda()
+        labels = labels.cuda()
+
+        optimizer.zero_grad()
+        outputs = model(imgs)
+        
+        loss = loss_func(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        losses.append(loss.item())
+
+        _, predicted = torch.max(outputs.data, 1)
+        acc += (predicted == labels).sum().item()
+
+        pbar.set_description(f'Epoch: {epoch+1}, loss: {loss.item():.4f}, correct: {acc}/{len(train_data)}')
+
+    print(f"train acc: {acc/len(train_data)*100}%")
+
+
+    model.eval()
+    acc = 0
+    pbar = tqdm(tdloader)
+    
+    with torch.no_grad():
+        for imgs, labels in pbar:
+            imgs = imgs.cuda()
+            labels = labels.cuda()
+
+            outputs = model(imgs)
+            _, predicted = torch.max(outputs.data, 1)
+            acc += (predicted == labels).sum().item()
+
+            pbar.set_description(f'Epoch: {epoch+1}, correct: {acc}/{len(test_data)}')
+
+        print(f"test acc: {acc/len(test_data)*100}%")
+
+##save model
+#torch.save(model.state_dict(), './model.pth')
+
+model.eval()
+with torch.no_grad():
+  #test_data의 모든 이미지를 불러와서 예측
+  for i in range(len(test_data)):
+    img, label = test_data[i]
+    img = img.unsqueeze(0).cuda()
+    output = model(img)
+    _, predicted = torch.max(output.data, 1)
+    #이미지이름을 출력
+    print("---------------------------")
+    print(test_data.imgs[i][0].split('/')[-1], end=' ')
+    print(f"predicted: {predicted}, label: {label}")
+
+
+
+
+////////////////////////////
+
+
+Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount("/content/drive", force_remount=True).
+VGG(
+  (cnn): Sequential(
+    (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (1): ReLU()
+    (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (3): ReLU()
+    (4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (5): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (6): ReLU()
+    (7): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (8): ReLU()
+    (9): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (10): Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (11): ReLU()
+    (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (13): ReLU()
+    (14): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (15): ReLU()
+    (16): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (17): Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (18): ReLU()
+    (19): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (20): ReLU()
+    (21): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (22): ReLU()
+    (23): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (24): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (25): ReLU()
+    (26): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (27): ReLU()
+    (28): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (29): ReLU()
+    (30): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  )
+  (fc): Sequential(
+    (0): Linear(in_features=8192, out_features=4096, bias=True)
+    (1): ReLU()
+    (2): Dropout(p=0.5, inplace=False)
+    (3): Linear(in_features=4096, out_features=2048, bias=True)
+    (4): ReLU()
+    (5): Dropout(p=0.5, inplace=False)
+    (6): Linear(in_features=2048, out_features=2, bias=True)
+  )
+)
+USE 1 GPUs!
+----------------
+ epoch:  0
+Epoch: 1, loss: 0.6910, correct: 236/500: 100%|██████████| 63/63 [00:05<00:00, 11.82it/s]
+train acc: 47.199999999999996%
+Epoch: 1, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 29.14it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  1
+Epoch: 2, loss: 0.6997, correct: 255/500: 100%|██████████| 63/63 [00:05<00:00, 12.01it/s]
+train acc: 51.0%
+Epoch: 2, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 29.65it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  2
+Epoch: 3, loss: 0.6968, correct: 240/500: 100%|██████████| 63/63 [00:05<00:00, 11.99it/s]
+train acc: 48.0%
+Epoch: 3, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 29.01it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  3
+Epoch: 4, loss: 0.6909, correct: 251/500: 100%|██████████| 63/63 [00:05<00:00, 11.92it/s]
+train acc: 50.2%
+Epoch: 4, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.73it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  4
+Epoch: 5, loss: 0.7014, correct: 259/500: 100%|██████████| 63/63 [00:05<00:00, 11.96it/s]
+train acc: 51.800000000000004%
+Epoch: 5, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.27it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  5
+Epoch: 6, loss: 0.6924, correct: 233/500: 100%|██████████| 63/63 [00:05<00:00, 11.84it/s]
+train acc: 46.6%
+Epoch: 6, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.37it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  6
+Epoch: 7, loss: 0.6968, correct: 239/500: 100%|██████████| 63/63 [00:05<00:00, 11.93it/s]
+train acc: 47.8%
+Epoch: 7, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 29.00it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  7
+Epoch: 8, loss: 0.6908, correct: 243/500: 100%|██████████| 63/63 [00:05<00:00, 11.45it/s]
+train acc: 48.6%
+Epoch: 8, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.21it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  8
+Epoch: 9, loss: 0.6900, correct: 246/500: 100%|██████████| 63/63 [00:05<00:00, 11.95it/s]
+train acc: 49.2%
+Epoch: 9, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.19it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  9
+Epoch: 10, loss: 0.6910, correct: 251/500: 100%|██████████| 63/63 [00:05<00:00, 11.80it/s]
+train acc: 50.2%
+Epoch: 10, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.98it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  10
+Epoch: 11, loss: 0.6989, correct: 235/500: 100%|██████████| 63/63 [00:05<00:00, 11.93it/s]
+train acc: 47.0%
+Epoch: 11, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.33it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  11
+Epoch: 12, loss: 0.6936, correct: 217/500: 100%|██████████| 63/63 [00:05<00:00, 11.88it/s]
+train acc: 43.4%
+Epoch: 12, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.67it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  12
+Epoch: 13, loss: 0.6902, correct: 259/500: 100%|██████████| 63/63 [00:05<00:00, 11.96it/s]
+train acc: 51.800000000000004%
+Epoch: 13, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 30.17it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  13
+Epoch: 14, loss: 0.6898, correct: 244/500: 100%|██████████| 63/63 [00:05<00:00, 11.90it/s]
+train acc: 48.8%
+Epoch: 14, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 29.46it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  14
+Epoch: 15, loss: 0.6949, correct: 237/500: 100%|██████████| 63/63 [00:05<00:00, 11.65it/s]
+train acc: 47.4%
+Epoch: 15, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 25.86it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  15
+Epoch: 16, loss: 0.6941, correct: 231/500: 100%|██████████| 63/63 [00:05<00:00, 11.79it/s]
+train acc: 46.2%
+Epoch: 16, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.06it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  16
+Epoch: 17, loss: 0.6957, correct: 246/500: 100%|██████████| 63/63 [00:05<00:00, 11.93it/s]
+train acc: 49.2%
+Epoch: 17, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.89it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  17
+Epoch: 18, loss: 0.6923, correct: 245/500: 100%|██████████| 63/63 [00:05<00:00, 11.89it/s]
+train acc: 49.0%
+Epoch: 18, correct: 27/47: 100%|██████████| 6/6 [00:00<00:00, 26.49it/s]
+test acc: 57.446808510638306%
+----------------
+ epoch:  18
+Epoch: 19, loss: 0.6945, correct: 232/500: 100%|██████████| 63/63 [00:05<00:00, 11.86it/s]
+train acc: 46.400000000000006%
+Epoch: 19, correct: 29/47: 100%|██████████| 6/6 [00:00<00:00, 29.24it/s]
+test acc: 61.702127659574465%
+----------------
+ epoch:  19
+Epoch: 20, loss: 0.6916, correct: 269/500: 100%|██████████| 63/63 [00:05<00:00, 11.85it/s]
+train acc: 53.800000000000004%
+Epoch: 20, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.35it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  20
+Epoch: 21, loss: 0.7220, correct: 282/500: 100%|██████████| 63/63 [00:05<00:00, 11.89it/s]
+train acc: 56.39999999999999%
+Epoch: 21, correct: 29/47: 100%|██████████| 6/6 [00:00<00:00, 28.12it/s]
+test acc: 61.702127659574465%
+----------------
+ epoch:  21
+Epoch: 22, loss: 0.7441, correct: 280/500: 100%|██████████| 63/63 [00:05<00:00, 11.91it/s]
+train acc: 56.00000000000001%
+Epoch: 22, correct: 21/47: 100%|██████████| 6/6 [00:00<00:00, 27.81it/s]
+test acc: 44.680851063829785%
+----------------
+ epoch:  22
+Epoch: 23, loss: 0.7175, correct: 304/500: 100%|██████████| 63/63 [00:05<00:00, 11.49it/s]
+train acc: 60.8%
+Epoch: 23, correct: 28/47: 100%|██████████| 6/6 [00:00<00:00, 28.20it/s]
+test acc: 59.57446808510638%
+----------------
+ epoch:  23
+Epoch: 24, loss: 0.5386, correct: 282/500: 100%|██████████| 63/63 [00:05<00:00, 11.90it/s]
+train acc: 56.39999999999999%
+Epoch: 24, correct: 22/47: 100%|██████████| 6/6 [00:00<00:00, 29.05it/s]
+test acc: 46.808510638297875%
+----------------
+ epoch:  24
+Epoch: 25, loss: 0.5955, correct: 299/500: 100%|██████████| 63/63 [00:05<00:00, 11.79it/s]
+train acc: 59.8%
+Epoch: 25, correct: 28/47: 100%|██████████| 6/6 [00:00<00:00, 28.34it/s]
+test acc: 59.57446808510638%
+----------------
+ epoch:  25
+Epoch: 26, loss: 0.5868, correct: 313/500: 100%|██████████| 63/63 [00:05<00:00, 11.81it/s]
+train acc: 62.6%
+Epoch: 26, correct: 26/47: 100%|██████████| 6/6 [00:00<00:00, 28.80it/s]
+test acc: 55.319148936170215%
+----------------
+ epoch:  26
+Epoch: 27, loss: 0.6270, correct: 323/500: 100%|██████████| 63/63 [00:05<00:00, 11.76it/s]
+train acc: 64.60000000000001%
+Epoch: 27, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.63it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  27
+Epoch: 28, loss: 0.5237, correct: 325/500: 100%|██████████| 63/63 [00:05<00:00, 11.70it/s]
+train acc: 65.0%
+Epoch: 28, correct: 26/47: 100%|██████████| 6/6 [00:00<00:00, 27.76it/s]
+test acc: 55.319148936170215%
+----------------
+ epoch:  28
+Epoch: 29, loss: 0.7873, correct: 316/500: 100%|██████████| 63/63 [00:05<00:00, 11.83it/s]
+train acc: 63.2%
+Epoch: 29, correct: 26/47: 100%|██████████| 6/6 [00:00<00:00, 26.93it/s]
+test acc: 55.319148936170215%
+----------------
+ epoch:  29
+Epoch: 30, loss: 0.5245, correct: 326/500: 100%|██████████| 63/63 [00:05<00:00, 11.69it/s]
+train acc: 65.2%
+Epoch: 30, correct: 27/47: 100%|██████████| 6/6 [00:00<00:00, 25.69it/s]
+test acc: 57.446808510638306%
+----------------
+ epoch:  30
+Epoch: 31, loss: 0.7492, correct: 321/500: 100%|██████████| 63/63 [00:05<00:00, 11.52it/s]
+train acc: 64.2%
+Epoch: 31, correct: 25/47: 100%|██████████| 6/6 [00:00<00:00, 29.00it/s]
+test acc: 53.191489361702125%
+----------------
+ epoch:  31
+Epoch: 32, loss: 0.4983, correct: 320/500: 100%|██████████| 63/63 [00:05<00:00, 11.88it/s]
+train acc: 64.0%
+Epoch: 32, correct: 22/47: 100%|██████████| 6/6 [00:00<00:00, 29.71it/s]
+test acc: 46.808510638297875%
+----------------
+ epoch:  32
+Epoch: 33, loss: 0.6958, correct: 348/500: 100%|██████████| 63/63 [00:05<00:00, 11.87it/s]
+train acc: 69.6%
+Epoch: 33, correct: 26/47: 100%|██████████| 6/6 [00:00<00:00, 27.75it/s]
+test acc: 55.319148936170215%
+----------------
+ epoch:  33
+Epoch: 34, loss: 0.8882, correct: 348/500: 100%|██████████| 63/63 [00:05<00:00, 11.86it/s]
+train acc: 69.6%
+Epoch: 34, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.77it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  34
+Epoch: 35, loss: 0.8532, correct: 341/500: 100%|██████████| 63/63 [00:05<00:00, 11.92it/s]
+train acc: 68.2%
+Epoch: 35, correct: 28/47: 100%|██████████| 6/6 [00:00<00:00, 28.92it/s]
+test acc: 59.57446808510638%
+----------------
+ epoch:  35
+Epoch: 36, loss: 0.4852, correct: 334/500: 100%|██████████| 63/63 [00:05<00:00, 11.79it/s]
+train acc: 66.8%
+Epoch: 36, correct: 22/47: 100%|██████████| 6/6 [00:00<00:00, 28.38it/s]
+test acc: 46.808510638297875%
+----------------
+ epoch:  36
+Epoch: 37, loss: 0.4575, correct: 351/500: 100%|██████████| 63/63 [00:05<00:00, 11.86it/s]
+train acc: 70.19999999999999%
+Epoch: 37, correct: 29/47: 100%|██████████| 6/6 [00:00<00:00, 26.84it/s]
+test acc: 61.702127659574465%
+----------------
+ epoch:  37
+Epoch: 38, loss: 0.4872, correct: 363/500: 100%|██████████| 63/63 [00:05<00:00, 11.86it/s]
+train acc: 72.6%
+Epoch: 38, correct: 22/47: 100%|██████████| 6/6 [00:00<00:00, 28.33it/s]
+test acc: 46.808510638297875%
+----------------
+ epoch:  38
+Epoch: 39, loss: 1.1985, correct: 366/500: 100%|██████████| 63/63 [00:05<00:00, 11.72it/s]
+train acc: 73.2%
+Epoch: 39, correct: 25/47: 100%|██████████| 6/6 [00:00<00:00, 24.36it/s]
+test acc: 53.191489361702125%
+----------------
+ epoch:  39
+Epoch: 40, loss: 0.3506, correct: 398/500: 100%|██████████| 63/63 [00:05<00:00, 11.48it/s]
+train acc: 79.60000000000001%
+Epoch: 40, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.22it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  40
+Epoch: 41, loss: 0.1975, correct: 403/500: 100%|██████████| 63/63 [00:05<00:00, 11.75it/s]
+train acc: 80.60000000000001%
+Epoch: 41, correct: 27/47: 100%|██████████| 6/6 [00:00<00:00, 28.43it/s]
+test acc: 57.446808510638306%
+----------------
+ epoch:  41
+Epoch: 42, loss: 0.1324, correct: 400/500: 100%|██████████| 63/63 [00:05<00:00, 11.75it/s]
+train acc: 80.0%
+Epoch: 42, correct: 28/47: 100%|██████████| 6/6 [00:00<00:00, 28.22it/s]
+test acc: 59.57446808510638%
+----------------
+ epoch:  42
+Epoch: 43, loss: 0.0794, correct: 419/500: 100%|██████████| 63/63 [00:05<00:00, 11.80it/s]
+train acc: 83.8%
+Epoch: 43, correct: 28/47: 100%|██████████| 6/6 [00:00<00:00, 28.25it/s]
+test acc: 59.57446808510638%
+----------------
+ epoch:  43
+Epoch: 44, loss: 0.2376, correct: 419/500: 100%|██████████| 63/63 [00:05<00:00, 11.79it/s]
+train acc: 83.8%
+Epoch: 44, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.20it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  44
+Epoch: 45, loss: 0.2274, correct: 448/500: 100%|██████████| 63/63 [00:05<00:00, 11.74it/s]
+train acc: 89.60000000000001%
+Epoch: 45, correct: 25/47: 100%|██████████| 6/6 [00:00<00:00, 28.46it/s]
+test acc: 53.191489361702125%
+----------------
+ epoch:  45
+Epoch: 46, loss: 0.2801, correct: 467/500: 100%|██████████| 63/63 [00:05<00:00, 11.80it/s]
+train acc: 93.4%
+Epoch: 46, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.73it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  46
+Epoch: 47, loss: 0.1349, correct: 469/500: 100%|██████████| 63/63 [00:05<00:00, 11.80it/s]
+train acc: 93.8%
+Epoch: 47, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 26.55it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  47
+Epoch: 48, loss: 0.1742, correct: 472/500: 100%|██████████| 63/63 [00:05<00:00, 11.60it/s]
+train acc: 94.39999999999999%
+Epoch: 48, correct: 22/47: 100%|██████████| 6/6 [00:00<00:00, 26.00it/s]
+test acc: 46.808510638297875%
+----------------
+ epoch:  48
+Epoch: 49, loss: 0.0064, correct: 477/500: 100%|██████████| 63/63 [00:05<00:00, 11.57it/s]
+train acc: 95.39999999999999%
+Epoch: 49, correct: 25/47: 100%|██████████| 6/6 [00:00<00:00, 27.27it/s]
+test acc: 53.191489361702125%
+----------------
+ epoch:  49
+Epoch: 50, loss: 0.0384, correct: 462/500: 100%|██████████| 63/63 [00:05<00:00, 11.81it/s]
+train acc: 92.4%
+Epoch: 50, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.21it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  50
+Epoch: 51, loss: 0.1853, correct: 487/500: 100%|██████████| 63/63 [00:05<00:00, 11.83it/s]
+train acc: 97.39999999999999%
+Epoch: 51, correct: 26/47: 100%|██████████| 6/6 [00:00<00:00, 28.94it/s]
+test acc: 55.319148936170215%
+----------------
+ epoch:  51
+Epoch: 52, loss: 0.1204, correct: 473/500: 100%|██████████| 63/63 [00:05<00:00, 11.76it/s]
+train acc: 94.6%
+Epoch: 52, correct: 25/47: 100%|██████████| 6/6 [00:00<00:00, 29.02it/s]
+test acc: 53.191489361702125%
+----------------
+ epoch:  52
+Epoch: 53, loss: 0.0002, correct: 490/500: 100%|██████████| 63/63 [00:05<00:00, 11.79it/s]
+train acc: 98.0%
+Epoch: 53, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.38it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  53
+Epoch: 54, loss: 0.0012, correct: 494/500: 100%|██████████| 63/63 [00:05<00:00, 11.74it/s]
+train acc: 98.8%
+Epoch: 54, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.64it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  54
+Epoch: 55, loss: 0.0182, correct: 497/500: 100%|██████████| 63/63 [00:05<00:00, 11.76it/s]
+train acc: 99.4%
+Epoch: 55, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.39it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  55
+Epoch: 56, loss: 0.0026, correct: 499/500: 100%|██████████| 63/63 [00:05<00:00, 11.41it/s]
+train acc: 99.8%
+Epoch: 56, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.61it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  56
+Epoch: 57, loss: 0.3591, correct: 489/500: 100%|██████████| 63/63 [00:05<00:00, 11.71it/s]
+train acc: 97.8%
+Epoch: 57, correct: 21/47: 100%|██████████| 6/6 [00:00<00:00, 27.83it/s]
+test acc: 44.680851063829785%
+----------------
+ epoch:  57
+Epoch: 58, loss: 0.0758, correct: 469/500: 100%|██████████| 63/63 [00:05<00:00, 11.82it/s]
+train acc: 93.8%
+Epoch: 58, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.66it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  58
+Epoch: 59, loss: 0.4110, correct: 494/500: 100%|██████████| 63/63 [00:05<00:00, 11.77it/s]
+train acc: 98.8%
+Epoch: 59, correct: 22/47: 100%|██████████| 6/6 [00:00<00:00, 28.14it/s]
+test acc: 46.808510638297875%
+----------------
+ epoch:  59
+Epoch: 60, loss: 0.0140, correct: 474/500: 100%|██████████| 63/63 [00:05<00:00, 11.71it/s]
+train acc: 94.8%
+Epoch: 60, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.66it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  60
+Epoch: 61, loss: 0.0001, correct: 496/500: 100%|██████████| 63/63 [00:05<00:00, 11.80it/s]
+train acc: 99.2%
+Epoch: 61, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.41it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  61
+Epoch: 62, loss: 0.0023, correct: 498/500: 100%|██████████| 63/63 [00:05<00:00, 11.74it/s]
+train acc: 99.6%
+Epoch: 62, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.32it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  62
+Epoch: 63, loss: 0.0006, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.55it/s]
+train acc: 100.0%
+Epoch: 63, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 26.25it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  63
+Epoch: 64, loss: 0.0015, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.48it/s]
+train acc: 100.0%
+Epoch: 64, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 26.66it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  64
+Epoch: 65, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.69it/s]
+train acc: 100.0%
+Epoch: 65, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.12it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  65
+Epoch: 66, loss: 0.0006, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.74it/s]
+train acc: 100.0%
+Epoch: 66, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.87it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  66
+Epoch: 67, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.79it/s]
+train acc: 100.0%
+Epoch: 67, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.26it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  67
+Epoch: 68, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.78it/s]
+train acc: 100.0%
+Epoch: 68, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.87it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  68
+Epoch: 69, loss: 0.0003, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.80it/s]
+train acc: 100.0%
+Epoch: 69, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 28.25it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  69
+Epoch: 70, loss: 0.0001, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.68it/s]
+train acc: 100.0%
+Epoch: 70, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.84it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  70
+Epoch: 71, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.45it/s]
+train acc: 100.0%
+Epoch: 71, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.85it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  71
+Epoch: 72, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.72it/s]
+train acc: 100.0%
+Epoch: 72, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.72it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  72
+Epoch: 73, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.78it/s]
+train acc: 100.0%
+Epoch: 73, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 26.79it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  73
+Epoch: 74, loss: 0.0001, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.65it/s]
+train acc: 100.0%
+Epoch: 74, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.27it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  74
+Epoch: 75, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.76it/s]
+train acc: 100.0%
+Epoch: 75, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.06it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  75
+Epoch: 76, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.78it/s]
+train acc: 100.0%
+Epoch: 76, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.35it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  76
+Epoch: 77, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.81it/s]
+train acc: 100.0%
+Epoch: 77, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.79it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  77
+Epoch: 78, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.69it/s]
+train acc: 100.0%
+Epoch: 78, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 26.12it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  78
+Epoch: 79, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.57it/s]
+train acc: 100.0%
+Epoch: 79, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.14it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  79
+Epoch: 80, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.76it/s]
+train acc: 100.0%
+Epoch: 80, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 26.06it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  80
+Epoch: 81, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.72it/s]
+train acc: 100.0%
+Epoch: 81, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.33it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  81
+Epoch: 82, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.73it/s]
+train acc: 100.0%
+Epoch: 82, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.39it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  82
+Epoch: 83, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.74it/s]
+train acc: 100.0%
+Epoch: 83, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.39it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  83
+Epoch: 84, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.72it/s]
+train acc: 100.0%
+Epoch: 84, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.60it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  84
+Epoch: 85, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.70it/s]
+train acc: 100.0%
+Epoch: 85, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.59it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  85
+Epoch: 86, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.35it/s]
+train acc: 100.0%
+Epoch: 86, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 25.94it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  86
+Epoch: 87, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.67it/s]
+train acc: 100.0%
+Epoch: 87, correct: 21/47: 100%|██████████| 6/6 [00:00<00:00, 27.16it/s]
+test acc: 44.680851063829785%
+----------------
+ epoch:  87
+Epoch: 88, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.77it/s]
+train acc: 100.0%
+Epoch: 88, correct: 21/47: 100%|██████████| 6/6 [00:00<00:00, 27.67it/s]
+test acc: 44.680851063829785%
+----------------
+ epoch:  88
+Epoch: 89, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.71it/s]
+train acc: 100.0%
+Epoch: 89, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 25.77it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  89
+Epoch: 90, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.70it/s]
+train acc: 100.0%
+Epoch: 90, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.21it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  90
+Epoch: 91, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.73it/s]
+train acc: 100.0%
+Epoch: 91, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 25.66it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  91
+Epoch: 92, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.68it/s]
+train acc: 100.0%
+Epoch: 92, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.07it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  92
+Epoch: 93, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.53it/s]
+train acc: 100.0%
+Epoch: 93, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 23.28it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  93
+Epoch: 94, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.58it/s]
+train acc: 100.0%
+Epoch: 94, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 28.67it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  94
+Epoch: 95, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.70it/s]
+train acc: 100.0%
+Epoch: 95, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.06it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  95
+Epoch: 96, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.72it/s]
+train acc: 100.0%
+Epoch: 96, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.88it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  96
+Epoch: 97, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.64it/s]
+train acc: 100.0%
+Epoch: 97, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.01it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  97
+Epoch: 98, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.70it/s]
+train acc: 100.0%
+Epoch: 98, correct: 24/47: 100%|██████████| 6/6 [00:00<00:00, 27.23it/s]
+test acc: 51.06382978723404%
+----------------
+ epoch:  98
+Epoch: 99, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.68it/s]
+train acc: 100.0%
+Epoch: 99, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.67it/s]
+test acc: 48.93617021276596%
+----------------
+ epoch:  99
+Epoch: 100, loss: 0.0000, correct: 500/500: 100%|██████████| 63/63 [00:05<00:00, 11.72it/s]
+train acc: 100.0%
+Epoch: 100, correct: 23/47: 100%|██████████| 6/6 [00:00<00:00, 27.27it/s]
+test acc: 48.93617021276596%
+---------------------------
+000001.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000002.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000007.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000008.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000010.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000016.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000027.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000032 - ы│╡ьВмы│╕.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000033.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000037.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000039.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000042.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000043.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000045.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000046.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000049.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000050.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000051.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000052.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000053.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000054.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000055.jpg predicted: tensor([0], device='cuda:0'), label: 0
+---------------------------
+000061.jpg predicted: tensor([1], device='cuda:0'), label: 0
+---------------------------
+000002.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000003.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000005.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000006.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000007.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000008.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000009 - ы│╡ьВмы│╕.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000009.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000011.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000012(0).jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000012.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000016.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000019(0).jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000019.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000023.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000024.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000025.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000026(0).jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000026.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000029.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000030.jpg predicted: tensor([1], device='cuda:0'), label: 1
+---------------------------
+000034.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000035.jpg predicted: tensor([0], device='cuda:0'), label: 1
+---------------------------
+000051.jpg predicted: tensor([1], device='cuda:0'), label: 1
