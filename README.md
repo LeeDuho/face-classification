@@ -1,1 +1,1 @@
-"face-classification" 
+동물상별로 얼굴 분류
